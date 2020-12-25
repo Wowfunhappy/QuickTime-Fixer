@@ -3,7 +3,7 @@ Mountain Lion QuickTime supports third party codecs. This means you can install 
 
 Unfortunately, when I get my head set on accomplishing something, it takes me way too long to give up. In this case, it mostly works... except for some some cosmetic issues. They're kind of minor, but bothersome if you're a stickler for details.
 
-Getting QuickTime to work mostly involved relinking the right frameworks. The actual code I inject—which can be viewed [here](https://github.com/Wowfunhappy/QuickTime-Fixer/blob/master/QuickTimeFixer/NSObject%2BSwizzling.m), attempts to fix visual issues when opening audio files (or making a screen recording). I'm somewhat somewhat embarassed by how long it took to get to these ~50 lines—I have no idea what's actually causing the glitches, and so resorted to poking at random functions. I successfully managed to make the window background appear.
+Getting QuickTime to work mostly involved relinking the right frameworks. The [code I inject](https://github.com/Wowfunhappy/QuickTime-Fixer/blob/master/QuickTimeFixer/NSObject%2BSwizzling.m) attempts to fix visual issues when opening audio files (or making a screen recording). I'm somewhat somewhat embarassed by how long it took to get to these ~50 lines—I have no idea what's actually causing the glitches, and so resorted to poking at random functions. I successfully managed to make the window background appear.
 
 Misc:
 - Audio files:
