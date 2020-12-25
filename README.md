@@ -5,7 +5,7 @@ Unfortunately, when I get my head set on accomplishing something, it takes me wa
 
 Getting QuickTime to work mostly involved relinking the right frameworks. The actual code I inject—which can be viewed [here](https://github.com/Wowfunhappy/QuickTime-Fixer/blob/master/QuickTimeFixer/NSObject%2BSwizzling.m), attempts to fix visual issues when opening audio files (or making a screen recording). I'm somewhat somewhat embarassed by how long it took to get to these ~50 lines—I have no idea what's actually causing the glitches, and so resorted to poking at random functions. I successfully managed to make the window background appear.
 
-Remaining issues:
+Misc:
 - Audio files:
   - Window corners are too round (8px instead of 4px).
   - Windows don't have a shadow.
