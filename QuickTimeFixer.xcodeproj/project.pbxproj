@@ -8,27 +8,20 @@
 
 /* Begin PBXBuildFile section */
 		AB4319102590EA1B00AE868B /* QuickTimeFixer.h in Headers */ = {isa = PBXBuildFile; fileRef = AB43190F2590EA1B00AE868B /* QuickTimeFixer.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		AB4319162590EA1C00AE868B /* QuickTimeFixer.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB43190A2590EA1B00AE868B /* QuickTimeFixer.framework */; };
-		AB43191D2590EA1C00AE868B /* QuickTimeFixerTests.m in Sources */ = {isa = PBXBuildFile; fileRef = AB43191C2590EA1C00AE868B /* QuickTimeFixerTests.m */; };
+		AB43192A2590EAB100AE868B /* NSObject+Swizzling.h in Headers */ = {isa = PBXBuildFile; fileRef = AB4319282590EAB100AE868B /* NSObject+Swizzling.h */; };
+		AB43192B2590EAB100AE868B /* NSObject+Swizzling.m in Sources */ = {isa = PBXBuildFile; fileRef = AB4319292590EAB100AE868B /* NSObject+Swizzling.m */; };
+		AB43192F2590EF0000AE868B /* ZKSwizzle.h in Headers */ = {isa = PBXBuildFile; fileRef = AB43192D2590EF0000AE868B /* ZKSwizzle.h */; };
+		AB4319302590EF0000AE868B /* ZKSwizzle.m in Sources */ = {isa = PBXBuildFile; fileRef = AB43192E2590EF0000AE868B /* ZKSwizzle.m */; };
 /* End PBXBuildFile section */
-
-/* Begin PBXContainerItemProxy section */
-		AB4319172590EA1C00AE868B /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = AB4319012590EA1B00AE868B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = AB4319092590EA1B00AE868B;
-			remoteInfo = QuickTimeFixer;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		AB43190A2590EA1B00AE868B /* QuickTimeFixer.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = QuickTimeFixer.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB43190E2590EA1B00AE868B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AB43190F2590EA1B00AE868B /* QuickTimeFixer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = QuickTimeFixer.h; sourceTree = "<group>"; };
-		AB4319152590EA1C00AE868B /* QuickTimeFixerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuickTimeFixerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		AB43191B2590EA1C00AE868B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		AB43191C2590EA1C00AE868B /* QuickTimeFixerTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = QuickTimeFixerTests.m; sourceTree = "<group>"; };
+		AB4319282590EAB100AE868B /* NSObject+Swizzling.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "NSObject+Swizzling.h"; sourceTree = "<group>"; };
+		AB4319292590EAB100AE868B /* NSObject+Swizzling.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "NSObject+Swizzling.m"; sourceTree = "<group>"; };
+		AB43192D2590EF0000AE868B /* ZKSwizzle.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ZKSwizzle.h; sourceTree = "<group>"; };
+		AB43192E2590EF0000AE868B /* ZKSwizzle.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ZKSwizzle.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -39,14 +32,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AB4319122590EA1C00AE868B /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				AB4319162590EA1C00AE868B /* QuickTimeFixer.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -54,7 +39,6 @@
 			isa = PBXGroup;
 			children = (
 				AB43190C2590EA1B00AE868B /* QuickTimeFixer */,
-				AB4319192590EA1C00AE868B /* QuickTimeFixerTests */,
 				AB43190B2590EA1B00AE868B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -63,7 +47,6 @@
 			isa = PBXGroup;
 			children = (
 				AB43190A2590EA1B00AE868B /* QuickTimeFixer.framework */,
-				AB4319152590EA1C00AE868B /* QuickTimeFixerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -71,8 +54,11 @@
 		AB43190C2590EA1B00AE868B /* QuickTimeFixer */ = {
 			isa = PBXGroup;
 			children = (
+				AB43192C2590EF0000AE868B /* ZKSwizzle */,
 				AB43190F2590EA1B00AE868B /* QuickTimeFixer.h */,
 				AB43190D2590EA1B00AE868B /* Supporting Files */,
+				AB4319282590EAB100AE868B /* NSObject+Swizzling.h */,
+				AB4319292590EAB100AE868B /* NSObject+Swizzling.m */,
 			);
 			path = QuickTimeFixer;
 			sourceTree = "<group>";
@@ -85,21 +71,13 @@
 			name = "Supporting Files";
 			sourceTree = "<group>";
 		};
-		AB4319192590EA1C00AE868B /* QuickTimeFixerTests */ = {
+		AB43192C2590EF0000AE868B /* ZKSwizzle */ = {
 			isa = PBXGroup;
 			children = (
-				AB43191C2590EA1C00AE868B /* QuickTimeFixerTests.m */,
-				AB43191A2590EA1C00AE868B /* Supporting Files */,
+				AB43192D2590EF0000AE868B /* ZKSwizzle.h */,
+				AB43192E2590EF0000AE868B /* ZKSwizzle.m */,
 			);
-			path = QuickTimeFixerTests;
-			sourceTree = "<group>";
-		};
-		AB43191A2590EA1C00AE868B /* Supporting Files */ = {
-			isa = PBXGroup;
-			children = (
-				AB43191B2590EA1C00AE868B /* Info.plist */,
-			);
-			name = "Supporting Files";
+			path = ZKSwizzle;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -109,6 +87,8 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB43192F2590EF0000AE868B /* ZKSwizzle.h in Headers */,
+				AB43192A2590EAB100AE868B /* NSObject+Swizzling.h in Headers */,
 				AB4319102590EA1B00AE868B /* QuickTimeFixer.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -134,24 +114,6 @@
 			productReference = AB43190A2590EA1B00AE868B /* QuickTimeFixer.framework */;
 			productType = "com.apple.product-type.framework";
 		};
-		AB4319142590EA1C00AE868B /* QuickTimeFixerTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = AB4319232590EA1C00AE868B /* Build configuration list for PBXNativeTarget "QuickTimeFixerTests" */;
-			buildPhases = (
-				AB4319112590EA1C00AE868B /* Sources */,
-				AB4319122590EA1C00AE868B /* Frameworks */,
-				AB4319132590EA1C00AE868B /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				AB4319182590EA1C00AE868B /* PBXTargetDependency */,
-			);
-			name = QuickTimeFixerTests;
-			productName = QuickTimeFixerTests;
-			productReference = AB4319152590EA1C00AE868B /* QuickTimeFixerTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -162,9 +124,6 @@
 				ORGANIZATIONNAME = "Jonathan Alland";
 				TargetAttributes = {
 					AB4319092590EA1B00AE868B = {
-						CreatedOnToolsVersion = 6.2;
-					};
-					AB4319142590EA1C00AE868B = {
 						CreatedOnToolsVersion = 6.2;
 					};
 				};
@@ -182,20 +141,12 @@
 			projectRoot = "";
 			targets = (
 				AB4319092590EA1B00AE868B /* QuickTimeFixer */,
-				AB4319142590EA1C00AE868B /* QuickTimeFixerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		AB4319082590EA1B00AE868B /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		AB4319132590EA1C00AE868B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -209,26 +160,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		AB4319112590EA1C00AE868B /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				AB43191D2590EA1C00AE868B /* QuickTimeFixerTests.m in Sources */,
+				AB43192B2590EAB100AE868B /* NSObject+Swizzling.m in Sources */,
+				AB4319302590EF0000AE868B /* ZKSwizzle.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXTargetDependency section */
-		AB4319182590EA1C00AE868B /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = AB4319092590EA1B00AE868B /* QuickTimeFixer */;
-			targetProxy = AB4319172590EA1C00AE868B /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AB43191E2590EA1C00AE868B /* Debug */ = {
@@ -345,38 +282,6 @@
 			};
 			name = Release;
 		};
-		AB4319242590EA1C00AE868B /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				COMBINE_HIDPI_IMAGES = YES;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(DEVELOPER_FRAMEWORKS_DIR)",
-					"$(inherited)",
-				);
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				INFOPLIST_FILE = QuickTimeFixerTests/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-			};
-			name = Debug;
-		};
-		AB4319252590EA1C00AE868B /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				COMBINE_HIDPI_IMAGES = YES;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(DEVELOPER_FRAMEWORKS_DIR)",
-					"$(inherited)",
-				);
-				INFOPLIST_FILE = QuickTimeFixerTests/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -396,14 +301,7 @@
 				AB4319222590EA1C00AE868B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-		};
-		AB4319232590EA1C00AE868B /* Build configuration list for PBXNativeTarget "QuickTimeFixerTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				AB4319242590EA1C00AE868B /* Debug */,
-				AB4319252590EA1C00AE868B /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
