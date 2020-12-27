@@ -36,7 +36,6 @@
     //Set "_entireBackBufferIsDirty" bit to 1
     *Ivars |= 1UL << 4;
     
-    [[self window] _discardWindowResizeConstraintsAndMarkAsNeedingUpdate];
     [super displayIfNeeded];
     ZKOrig(void);
     
