@@ -45,8 +45,8 @@
 - (void)_windowChangedKeyState {
     ZKOrig(void);
     
-    //Fixes window shadows. I hate using an arbitrary delay, but none of the alternatives I tried performed as well.
-    [self performSelector:@selector(shapeWindow) withObject:nil afterDelay:0.00000001];
+    //Fixes window shadows.
+    [self performSelector:@selector(shapeWindow) withObject:nil afterDelay:0];
     
     //Fixes fullscreen animations.
     [[self window] _makeLayerBacked];
@@ -62,16 +62,15 @@
 
 @implementation myMGDocumentWindowController
 
-//This entire class is all "optional", in that without it, the exit fullscreen animation will work as well as it does in Mountain Lion. But, I don't like how it looks in Mountain Lion; even the default system animation is smoother. So, that's what we'll use instead.
+//Swizzling this class is "optional", in that without it, the exit fullscreen animation will work as well as it does in Mountain Lion. But, I don't like how it looks in Mountain Lion; the default system animation is smoother! So, let's use that instead.
 
 - (id)customWindowsToExitFullScreenForWindow:(id)arg1 {
-    [self performSelector:@selector(setFullScreenDisabled) withObject:nil afterDelay:0.1];
-    [[self window] setHasShadow:true];
+    [self performSelector:@selector(setFullScreenDisabled) withObject:nil afterDelay:0];
     return nil;
 }
 
 - (void) setFullScreenDisabled {
-    [self setFullScreen:false duration:1];
+    [self setFullScreen:false duration:-1];
 }
 
 @end
