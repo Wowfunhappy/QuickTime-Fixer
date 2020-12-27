@@ -18,6 +18,7 @@
 @interface NSWindow (my)
 - (void)_makeLayerBacked;
 - (void)_discardWindowResizeConstraintsAndMarkAsNeedingUpdate;
+- (id)_canBecomeFullScreen;
 @end
 
 @interface myMGDocumentWindowController : NSWindowController
@@ -48,7 +49,9 @@
     [self performSelector:@selector(shapeWindow) withObject:nil afterDelay:0];
     
     //Fixes fullscreen animations.
-    [[self window] _makeLayerBacked];
+    if ([[self window] _canBecomeFullScreen] != NULL) {
+        [[self window] _makeLayerBacked];
+    }
 }
 
 - (void)setCanDrawSubviewsIntoLayer:(BOOL)arg1; {
