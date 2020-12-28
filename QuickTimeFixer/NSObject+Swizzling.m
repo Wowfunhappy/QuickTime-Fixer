@@ -11,6 +11,7 @@
 #import "ZKSwizzle.h"
 
 @interface myMGCinematicFrameView : NSView
+- (void)shapeWindow;
 @end
 
 @interface NSWindow (my)
@@ -49,7 +50,7 @@
     }
     
     //Fixes window shadows.
-    [[self window] update];
+    [self shapeWindow];
 }
 
 @end
@@ -60,7 +61,6 @@
 
 + (void)load {
     ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
-    ZKSwizzle(myMGPlayerDocument, MGPlayerDocument);
     
     //Fix menu bar not switching to QuickTime
     [[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
