@@ -55,15 +55,14 @@
         [[self window] _makeLayerBacked];
     }
     
+    //Fixes window shadows.
+    [[self window]update];
+    
     ZKOrig(void);
 }
 
 - (void)setTitle:(id)arg1 {
     needSetBackBufferDirty = true;
-    
-    //Fixes window shadows.
-    [[self window]update];
-    
     ZKOrig(void, arg1);
 }
 
