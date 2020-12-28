@@ -24,13 +24,12 @@
 @implementation myMGCinematicFrameView
 
 - (void)displayIfNeeded {
+    //Misleading: this actually gets a set of nine bits from MGCinematicFrameView, only one of which represents _entireBackBufferIsDirty.
+    unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
+    
+    //Set _entireBackBufferIsDirty bit to 1
+    *Ivars |= 1UL << 4;
     if ([[self window] _canBecomeFullScreen] == NULL) {
-        //Misleading: this actually gets a set of nine bits from MGCinematicFrameView, only one of which represents _entireBackBufferIsDirty.
-        unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
-        
-        //Set _entireBackBufferIsDirty bit to 1
-        *Ivars |= 1UL << 4;
-        
         NSDisableScreenUpdates();
         [self displayIfNeededIgnoringOpacity];
         ZKOrig(void);
