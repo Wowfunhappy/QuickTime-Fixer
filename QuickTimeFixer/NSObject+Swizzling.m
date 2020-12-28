@@ -10,9 +10,7 @@
 #import <Cocoa/Cocoa.h>
 #import "ZKSwizzle.h"
 
-#import "/Users/jonathan/Desktop/macOS_headers-master/macOS/Frameworks/AppKit/1/NSFrameView.h"
-
-@interface myMGCinematicFrameView : NSFrameView
+@interface myMGCinematicFrameView : NSView
 @end
 
 @interface NSWindow (my)
@@ -54,10 +52,6 @@
     [[self window] update];
 }
 
-- (void)setWindowNotOpaque {
-    [[self window] setOpaque:false];
-}
-
 @end
 
 
@@ -66,15 +60,11 @@
 
 + (void)load {
     ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
+    ZKSwizzle(myMGPlayerDocument, MGPlayerDocument);
     
     //Fix menu bar not switching to QuickTime
-    [self runApplescript: [NSMutableString stringWithFormat:@"tell application (path to frontmost application as text) to activate"]];
-}
-
-- (void)runApplescript:(NSMutableString *)scriptSource {
-    NSAppleScript *script = [[NSAppleScript alloc] initWithSource:scriptSource];
-    NSDictionary *error;
-    [[script executeAndReturnError:&error] stringValue];
+    [[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
+    
 }
 
 @end
