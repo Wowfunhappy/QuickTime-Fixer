@@ -27,8 +27,7 @@
 @implementation myMGCinematicFrameView
 
 - (void)displayIfNeeded {
-    if (needSetBackBufferDirty | [[self window]inLiveResize]) {
-        NSLog(@"Yay!");
+    if (needSetBackBufferDirty | ([[self window]inLiveResize] && (![self canBecomeFullScreen])) ) {
         
         //Misleading: this actually gets a set of nine bits from MGCinematicFrameView, only one of which represents _entireBackBufferIsDirty.
         unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
@@ -49,22 +48,27 @@
 }
 
 - (void)_windowChangedKeyState {
-    ZKOrig(void);
+    needSetBackBufferDirty = true;
     
     //Fixes fullscreen animations.
-    if ([[self window] _canBecomeFullScreen] != NULL) {
+    if ([self canBecomeFullScreen]) {
         [[self window] _makeLayerBacked];
     }
-
-    needSetBackBufferDirty = true;
-
-    //Fixes window shadows.
-    [[self window]update];
+    
+    ZKOrig(void);
 }
 
-- (id)initWithFrame:(struct CGRect)arg1 styleMask:(unsigned long long)arg2 owner:(id)arg3 {
+- (void)setTitle:(id)arg1 {
     needSetBackBufferDirty = true;
-    return ZKOrig(id, arg1, arg2, arg3);
+    
+    //Fixes window shadows.
+    [[self window]update];
+    
+    ZKOrig(void, arg1);
+}
+
+- (bool)canBecomeFullScreen {
+    return ([[self window] _canBecomeFullScreen] != NULL);
 }
 
 @end
