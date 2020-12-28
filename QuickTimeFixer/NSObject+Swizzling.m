@@ -29,15 +29,10 @@
     
     //Set _entireBackBufferIsDirty bit to 1
     *Ivars |= 1UL << 4;
-    if ([[self window] _canBecomeFullScreen] == NULL) {
-        NSDisableScreenUpdates();
-        [self displayIfNeededIgnoringOpacity];
-        ZKOrig(void);
-        NSEnableScreenUpdates();
-    }
-    else {
-        ZKOrig(void);
-    }
+    NSDisableScreenUpdates();
+    [self displayIfNeededIgnoringOpacity];
+    ZKOrig(void);
+    NSEnableScreenUpdates();
 }
 
 - (void)_windowChangedKeyState {
@@ -49,7 +44,7 @@
     }
     
     //Fixes window shadows.
-    [self shapeWindow];
+    [[self window] update];
 }
 
 @end
