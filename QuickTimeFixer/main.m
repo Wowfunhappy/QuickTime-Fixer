@@ -27,6 +27,9 @@
 @interface myMGScrollEventHandlingHUDSlider : NSObject
 @end
 
+@interface myNSControl : NSControl
+@end
+
 @interface NSWindow (my)
 - (void)_makeLayerBacked;
 - (id)_canBecomeFullScreen;
@@ -184,6 +187,16 @@ void startAudioDeviceChangedListener() {
 
 
 
+@implementation myNSControl
+
+- (BOOL)becomeFirstResponder {
+    return false;
+}
+
+@end
+
+
+
 @implementation NSObject (main)
 
 + (void)load {
@@ -191,6 +204,7 @@ void startAudioDeviceChangedListener() {
     ZKSwizzle(myQTHUDSliderCell, QTHUDSliderCell);
     ZKSwizzle(myMGPlayerController, MGPlayerController);
     ZKSwizzle(myMGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
+    ZKSwizzle(myNSControl, QTHUDButton);
     
     //Fix menu bar not switching to QuickTime
     [[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
