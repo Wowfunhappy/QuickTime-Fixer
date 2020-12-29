@@ -1,8 +1,7 @@
 //
-//  NSObject+Swizzling.m
 //  QuickTimeFixer
 //
-//  Created by Jonathan Alland on 12/21/20.
+//  This code was written by Jonathan Alland.
 //  Copyright (c) 2020 Jonathan Alland. All rights reserved.
 //
 
@@ -22,6 +21,12 @@
 @interface myQTHUDSliderCell : NSSlider
 @end
 
+@interface myMGPlayerController : NSController
+@end
+
+@interface myMGScrollEventHandlingHUDSlider : NSObject
+@end
+
 @interface NSWindow (my)
 - (void)_makeLayerBacked;
 - (id)_canBecomeFullScreen;
@@ -29,16 +34,43 @@
 
 
 
-/*global functions*/
+/*global*/
 
-void setAudioVolume() {
+AudioDeviceID device;
+UInt32 size = sizeof(AudioDeviceID);
+UInt32 gChannels[2];
+
+void setQTSliderVolume() {
     NSString *scriptText = [NSString stringWithFormat:@"tell application \"QuickTime Player\" to tell (every document whose name is not \"%@\" and name is not \"%@\") to set audio volume to (output volume of (get volume settings)) * 0.01", NSLocalizedString(@"Audio Recording", nil), NSLocalizedString(@"Movie Recording", nil)];
     [[[NSAppleScript alloc] initWithSource:scriptText] executeAndReturnError:nil];
 }
 
-OSStatus volumeChangedCallback ( AudioDeviceID inDevice, UInt32 inChannel, Boolean isInput, AudioDevicePropertyID inPropertyID, void* inClientData) {
-    setAudioVolume();
+OSStatus volumeChangedCallback (AudioDeviceID inDevice, UInt32 inChannel, Boolean isInput, AudioDevicePropertyID inPropertyID, void* inClientData) {
+    setQTSliderVolume();
     return 0;
+}
+
+void startVolumeChangedListener() {
+    AudioHardwareGetProperty(kAudioHardwarePropertyDefaultOutputDevice, &size, &device);
+    AudioDeviceGetProperty(device, 0, false, kAudioDevicePropertyPreferredChannelsForStereo, &size, gChannels);
+    AudioDeviceAddPropertyListener(device, gChannels[0], false, kAudioDevicePropertyVolumeScalar, (AudioDevicePropertyListenerProc) volumeChangedCallback, nil);
+}
+
+OSStatus audioDeviceChangedCallback(AudioObjectID inObjectID, UInt32 inNumberAddresses, const AudioObjectPropertyAddress inAddresses[], void *inClientData) {
+    /*Warning: This function assumes startVolumeChangedListener has already been called at least once! Please make sure that happens!*/
+    AudioDeviceRemovePropertyListener(device, gChannels[0], false, kAudioDevicePropertyVolumeScalar, (AudioDevicePropertyListenerProc) volumeChangedCallback);
+    startVolumeChangedListener();
+    setQTSliderVolume();
+    return 0;
+}
+
+void startAudioDeviceChangedListener() {
+    AudioObjectPropertyAddress outputDeviceAddress = {
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMaster
+    };
+    AudioObjectAddPropertyListener(kAudioObjectSystemObject, &outputDeviceAddress, &audioDeviceChangedCallback, nil);
 }
 
 
@@ -85,7 +117,7 @@ OSStatus volumeChangedCallback ( AudioDeviceID inDevice, UInt32 inChannel, Boole
     [[self window]update];
     
     if (needsUpdateVolume) {
-        setAudioVolume();
+        setQTSliderVolume();
         needsUpdateVolume = false;
     }
     
@@ -102,6 +134,8 @@ OSStatus volumeChangedCallback ( AudioDeviceID inDevice, UInt32 inChannel, Boole
 
 @implementation myQTHUDSliderCell
 
+//By default, the volume slider doesn't work, and I can't figure out why. So, I've made it control the system volume instead, as it does on iOS. I don't consider this behavior better or worse, merely different—clearly, Apple thought it was worth doing on the iPhone.
+
 - (double)_QTHUDSliderValidateUserValue:(double)arg1 {
     [self setSystemVolume:arg1];
     return ZKOrig(double, arg1);
@@ -116,22 +150,48 @@ OSStatus volumeChangedCallback ( AudioDeviceID inDevice, UInt32 inChannel, Boole
 
 
 
-@implementation NSObject (Swizzling)
+@implementation myMGScrollEventHandlingHUDSlider
+//We made QuickTime's volume slider corrospond to the system volume. To avoid accidents, let's remove some methods of changing the slider.
+- (void)beginGestureWithEvent:(id)arg1 {}
+- (void)scrollWheel:(id)arg1 {}
+@end
+
+
+
+@implementation myMGPlayerController
+
+//Again, we want to disable some ways to change the volume slider.
+- (void)increaseVolume:(id)arg {}
+- (void)decreaseVolume:(id)arg1 {}
+
+- (void)changeVolumeToMinimum:(id)arg1 {
+    [[[NSAppleScript alloc] initWithSource:@"set volume with output muted"] executeAndReturnError:nil];
+    
+    NSString *scriptText = [NSString stringWithFormat:@"tell application \"QuickTime Player\" to tell (every document whose name is not \"%@\" and name is not \"%@\") to set audio volume to 0", NSLocalizedString(@"Audio Recording", nil), NSLocalizedString(@"Movie Recording", nil)];
+    [[[NSAppleScript alloc] initWithSource:scriptText] executeAndReturnError:nil];
+}
+- (void)changeVolumeToMaximum:(id)arg1 {
+    [[[NSAppleScript alloc] initWithSource:@"set volume without output muted"] executeAndReturnError:nil];
+    setQTSliderVolume();
+}
+
+@end
+
+
+
+@implementation NSObject (main)
 
 + (void)load {
     ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
     ZKSwizzle(myQTHUDSliderCell, QTHUDSliderCell);
+    ZKSwizzle(myMGPlayerController, MGPlayerController);
+    ZKSwizzle(myMGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
     
     //Fix menu bar not switching to QuickTime
     [[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
     
-    //Listen for system volume changes
-    AudioDeviceID device;
-    UInt32 size = sizeof(AudioDeviceID);
-    AudioHardwareGetProperty(kAudioHardwarePropertyDefaultOutputDevice, &size, &device);
-    UInt32 gChannels[2];
-    AudioDeviceGetProperty(device, 0, false, kAudioDevicePropertyPreferredChannelsForStereo, &size, gChannels);
-    AudioDeviceAddPropertyListener(device, gChannels[0], false, kAudioDevicePropertyVolumeScalar, (AudioDevicePropertyListenerProc) volumeChangedCallback, nil);
+    startVolumeChangedListener();
+    startAudioDeviceChangedListener();
 }
 
 @end
