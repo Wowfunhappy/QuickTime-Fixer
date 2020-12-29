@@ -76,6 +76,7 @@ void startAudioDeviceChangedListener() {
 
 
 @implementation myMGCinematicFrameView
+//Graphical issues were fixed in this class. These fixes were mostly discovered via brute-force trial and error, and I largely don't understand why they work.
 
 - (void)setTitle:(id)arg1 {
     //This method conveniently runs once when new windows are created. We can use it like an init method.
@@ -87,11 +88,15 @@ void startAudioDeviceChangedListener() {
 - (void)displayIfNeeded {
     if (needsSetBackBufferDirty | ([[self window]inLiveResize] && (![self canBecomeFullScreen])) ) {
         
-        //Misleading: this actually gets a set of nine bits from MGCinematicFrameView, only one of which represents _entireBackBufferIsDirty.
+        //This is very misleading. ZKHookIvar will actually return a set of nine bits from MGCinematicFrameView. The fifth of these bits represents _entireBackBufferIsDirty.
         unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
         
-        //Set _entireBackBufferIsDirty bit to 1
+        //Set the _entireBackBufferIsDirty bit to 1
         *Ivars |= 1UL << 4;
+        
+        //In order for setting the _entireBackBufferIsDirty bit to actually fix window backgrounds, we need to run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded] (we use the former because I think it's more efficient) FOLLOWED BY the original [self displayIfNeeded] (via ZKOrig). Disabling screen updates between the two prevents a brief flash of no-background becoming visible.
+        //Consider, for a moment, how little sense this makes. To fix thie problem, we need to run a varation of displayIfNeeded followed by the normal displayIfNeeded! Which should be basically the same code! And in case you're wondering, yes, you _must_ call one and then the other—simply running either of them twice won't do it.
+        //But it works. So whatevs.
         
         NSDisableScreenUpdates();
         [self displayIfNeededIgnoringOpacity];
