@@ -7,7 +7,6 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "NSObject+Swizzling.h"
 #import <Cocoa/Cocoa.h>
 #import <AVFoundation/AVFoundation.h>
 #import "ZKSwizzle.h"
@@ -47,8 +46,7 @@ OSStatus volumeChangedCallback ( AudioDeviceID inDevice, UInt32 inChannel, Boole
 @implementation myMGCinematicFrameView
 
 - (void)setTitle:(id)arg1 {
-    //This method conveniently runs once when a new window is created.
-    
+    //This method conveniently runs once when new windows are created. We can use it like an init method.
     needsSetBackBufferDirty = true;
     needsUpdateVolume = true;
     ZKOrig(void, arg1);
@@ -83,13 +81,13 @@ OSStatus volumeChangedCallback ( AudioDeviceID inDevice, UInt32 inChannel, Boole
         [[self window] _makeLayerBacked];
     }
     
+    //Fixes window shadows.
+    [[self window]update];
+    
     if (needsUpdateVolume) {
         setAudioVolume();
         needsUpdateVolume = false;
     }
-    
-    //Fixes window shadows.
-    [[self window]update];
     
     ZKOrig(void);
 }
@@ -112,13 +110,6 @@ OSStatus volumeChangedCallback ( AudioDeviceID inDevice, UInt32 inChannel, Boole
 - (void) setSystemVolume: (double)volume {
     NSString *scriptText = [NSString stringWithFormat:@"set volume output volume %f * 100", volume];
     [[[NSAppleScript alloc] initWithSource:scriptText] executeAndReturnError:nil];
-}
-
-- (id)initWithCoder:(id)arg1 {
-    //Runs once each time a new window is created.
-    //setAudioVolume();
-    
-    return ZKOrig (id, arg1);
 }
 
 @end

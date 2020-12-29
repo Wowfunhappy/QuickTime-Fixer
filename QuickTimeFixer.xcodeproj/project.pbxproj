@@ -8,8 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		AB4319102590EA1B00AE868B /* QuickTimeFixer.h in Headers */ = {isa = PBXBuildFile; fileRef = AB43190F2590EA1B00AE868B /* QuickTimeFixer.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		AB43192A2590EAB100AE868B /* NSObject+Swizzling.h in Headers */ = {isa = PBXBuildFile; fileRef = AB4319282590EAB100AE868B /* NSObject+Swizzling.h */; };
-		AB43192B2590EAB100AE868B /* NSObject+Swizzling.m in Sources */ = {isa = PBXBuildFile; fileRef = AB4319292590EAB100AE868B /* NSObject+Swizzling.m */; };
+		AB43192B2590EAB100AE868B /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = AB4319292590EAB100AE868B /* main.m */; };
 		AB43192F2590EF0000AE868B /* ZKSwizzle.h in Headers */ = {isa = PBXBuildFile; fileRef = AB43192D2590EF0000AE868B /* ZKSwizzle.h */; };
 		AB4319302590EF0000AE868B /* ZKSwizzle.m in Sources */ = {isa = PBXBuildFile; fileRef = AB43192E2590EF0000AE868B /* ZKSwizzle.m */; };
 /* End PBXBuildFile section */
@@ -18,8 +17,7 @@
 		AB43190A2590EA1B00AE868B /* QuickTimeFixer.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = QuickTimeFixer.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB43190E2590EA1B00AE868B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AB43190F2590EA1B00AE868B /* QuickTimeFixer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = QuickTimeFixer.h; sourceTree = "<group>"; };
-		AB4319282590EAB100AE868B /* NSObject+Swizzling.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "NSObject+Swizzling.h"; sourceTree = "<group>"; };
-		AB4319292590EAB100AE868B /* NSObject+Swizzling.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "NSObject+Swizzling.m"; sourceTree = "<group>"; };
+		AB4319292590EAB100AE868B /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		AB43192D2590EF0000AE868B /* ZKSwizzle.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ZKSwizzle.h; sourceTree = "<group>"; };
 		AB43192E2590EF0000AE868B /* ZKSwizzle.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ZKSwizzle.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -57,8 +55,7 @@
 				AB43192C2590EF0000AE868B /* ZKSwizzle */,
 				AB43190F2590EA1B00AE868B /* QuickTimeFixer.h */,
 				AB43190D2590EA1B00AE868B /* Supporting Files */,
-				AB4319282590EAB100AE868B /* NSObject+Swizzling.h */,
-				AB4319292590EAB100AE868B /* NSObject+Swizzling.m */,
+				AB4319292590EAB100AE868B /* main.m */,
 			);
 			path = QuickTimeFixer;
 			sourceTree = "<group>";
@@ -88,7 +85,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				AB43192F2590EF0000AE868B /* ZKSwizzle.h in Headers */,
-				AB43192A2590EAB100AE868B /* NSObject+Swizzling.h in Headers */,
 				AB4319102590EA1B00AE868B /* QuickTimeFixer.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -160,7 +156,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AB43192B2590EAB100AE868B /* NSObject+Swizzling.m in Sources */,
+				AB43192B2590EAB100AE868B /* main.m in Sources */,
 				AB4319302590EF0000AE868B /* ZKSwizzle.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
