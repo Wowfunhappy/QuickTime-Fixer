@@ -12,25 +12,28 @@
 
 @interface myMGCinematicFrameView : NSView
 {
-    unsigned int doNotUse; //Without this, the next iVar seems to get messed up.
+    unsigned int doNotUse1; //Without this, other iVars seems to get messed up.
+    bool hasSetup;
     bool needsSetBackBufferDirty;
     bool needsUpdateVolume;
+    NSString *doNotUse2; //See above.
+    NSString *ourLegacyMediaBridgePID;
 }
 @end
 
 @interface myQTHUDSliderCell : NSSlider
 @end
 
-@interface myMGPlayerController : NSController
-@end
-
 @interface myMGScrollEventHandlingHUDSlider : NSObject
 @end
 
-@interface myNSControl : NSControl
+@interface myMGPlayerController : NSController
 @end
 
-@interface NSWindow (my)
+@interface myQTHUDButton : NSControl
+@end
+
+@interface NSWindow (quickTimeFixer)
 - (void)_makeLayerBacked;
 - (id)_canBecomeFullScreen;
 @end
@@ -43,6 +46,8 @@ AudioDeviceID device;
 UInt32 size = sizeof(AudioDeviceID);
 UInt32 gChannels[2];
 
+NSMutableArray *existingLegacyMediaBridgePIDs;
+
 void setQTSliderVolume() {
     NSString *scriptText = [NSString stringWithFormat:@"tell application \"QuickTime Player\" to tell (every document whose name is not \"%@\" and name is not \"%@\") to set audio volume to (output volume of (get volume settings)) * 0.01", NSLocalizedString(@"Audio Recording", nil), NSLocalizedString(@"Movie Recording", nil)];
     [[[NSAppleScript alloc] initWithSource:scriptText] executeAndReturnError:nil];
@@ -54,13 +59,15 @@ OSStatus volumeChangedCallback (AudioDeviceID inDevice, UInt32 inChannel, Boolea
 }
 
 void startVolumeChangedListener() {
+    //Apple's deprication warnings are extremely unhelpful when there isn't anything else we can use instead...
+    //(Not to mention, this code should only ever be used on OS X 10.9.)
     AudioHardwareGetProperty(kAudioHardwarePropertyDefaultOutputDevice, &size, &device);
     AudioDeviceGetProperty(device, 0, false, kAudioDevicePropertyPreferredChannelsForStereo, &size, gChannels);
     AudioDeviceAddPropertyListener(device, gChannels[0], false, kAudioDevicePropertyVolumeScalar, (AudioDevicePropertyListenerProc) volumeChangedCallback, nil);
 }
 
 OSStatus audioDeviceChangedCallback(AudioObjectID inObjectID, UInt32 inNumberAddresses, const AudioObjectPropertyAddress inAddresses[], void *inClientData) {
-    /*Warning: This function assumes startVolumeChangedListener has already been called at least once! Please make sure that happens!*/
+    //WARNING: This function assumes startVolumeChangedListener has already been called at least once! Please make sure that happens!
     AudioDeviceRemovePropertyListener(device, gChannels[0], false, kAudioDevicePropertyVolumeScalar, (AudioDevicePropertyListenerProc) volumeChangedCallback);
     startVolumeChangedListener();
     setQTSliderVolume();
@@ -76,31 +83,99 @@ void startAudioDeviceChangedListener() {
     AudioObjectAddPropertyListener(kAudioObjectSystemObject, &outputDeviceAddress, &audioDeviceChangedCallback, nil);
 }
 
+NSString* runShellCommand(NSString *command) {
+    NSTask *task = [[NSTask alloc] init];
+    task.environment = @{}; //If we don't reset this, QuickTime will try to inject the QuickTime fixer library into this task!
+    [task setLaunchPath:@"/bin/sh"];
+    [task setArguments:@[@"-c", command]];
+    
+    NSPipe *pipe = [[NSPipe alloc] init];
+    NSFileHandle *fileHandle = [pipe fileHandleForReading];
+    [task setStandardOutput:pipe];
+    [task launch];
+    [task waitUntilExit];
+    
+    NSData *data = [fileHandle readDataToEndOfFile];
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
+/*end global*/
+
 
 
 @implementation myMGCinematicFrameView
-//Graphical issues were fixed in this class. These fixes were mostly discovered via brute-force trial and error, and I largely don't understand why they work.
+//This class (1) fixes graphical issues, and (2) tracks and kills legacyMediaBridge instances.
+//Graphical fixes were  discovered largely via brute-force trial and error, and I mostly don't understand why they work.
 
-- (void)setTitle:(id)arg1 {
-    //This method conveniently runs once when new windows are created. We can use it like an init method.
+- (void)ghettoInit {
     needsSetBackBufferDirty = true;
     needsUpdateVolume = true;
-    ZKOrig(void, arg1);
+    
+    ourLegacyMediaBridgePID = @"";
+    [self performSelector:@selector(findLegacyMediaBridgePID) withObject:nil afterDelay:0.5];
+    
+    hasSetup = true;
+}
+
+- (void)ghettoDealloc {
+    if ([ourLegacyMediaBridgePID length] > 0) {
+        [existingLegacyMediaBridgePIDs removeObject:ourLegacyMediaBridgePID];
+        runShellCommand([NSString stringWithFormat:@"kill -n 2 %@", ourLegacyMediaBridgePID]);
+    }
+}
+
+- (void)findLegacyMediaBridgePID {
+    /*QuickTime interacts with QuickTime components via legacyMediaBridge, but on Mavericks, it doesn't seem to
+     close the legacymediabridge.videodecompression processes once it's done with them. They stick around, eating
+     up small amounts of memory (~20mb each) until the user quits QuickTime.
+     
+     To fix this, we need to close these processes ourself, which implies tracking their creation.
+     To do so, we look for instances of legacymediabridge.videodecompression, and record their PIDs
+     in a globally-accessible array. If we find exactly one PID which we haven't seen before, we can safely
+     assume it belongs to us. This won't always work, but it doesn't really have to.*/
+    
+    NSString *stringOfFoundPIDs = runShellCommand(@"ps -A | grep -v grep | grep com.apple.legacymediabridge.videodecompression | awk '{print $1;}'");
+    stringOfFoundPIDs = [stringOfFoundPIDs stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([stringOfFoundPIDs length] > 0){
+        NSArray *foundPIDs = [stringOfFoundPIDs componentsSeparatedByString:@"\n"];
+        
+        bool alreadyFoundAUniquePID = false;
+        for (int i = 0; i < [foundPIDs count]; i++) {
+            if (![existingLegacyMediaBridgePIDs containsObject:[foundPIDs objectAtIndex:i]]){
+                NSString *foundPID = [foundPIDs objectAtIndex:i];
+                [existingLegacyMediaBridgePIDs addObject:foundPID];
+                if (! alreadyFoundAUniquePID) {
+                    alreadyFoundAUniquePID = true;
+                    ourLegacyMediaBridgePID = foundPID;
+                } else {
+                    /*We found a unique PID, but we already found one! The user probably opened multiple
+                    videos at once. There's no way to know which one is ours.*/
+                    ourLegacyMediaBridgePID = @"";
+                }
+            }
+        }
+    }
 }
 
 - (void)displayIfNeeded {
     if (needsSetBackBufferDirty | ([[self window]inLiveResize] && (![self canBecomeFullScreen])) ) {
+        /*Window backgrounds are currently glitched. To fix them, we need to do the following:
+            1. Set _entireBackBufferIsDirty bit
+            2. Run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded].
+                (We use the former, as it should be more efficient.)
+            3. Run the original [self displayIfNeeded]
+
+        Notably, steps two and three make no sense! We're running a varation of displayIfNeeded followed by the
+        normal displayIfNeeded, which should be basically the same thing! And, yes, you _must_ call one and
+        then the other—running either twice is not sufficient.*/
         
-        //This is very misleading. ZKHookIvar will actually return a set of nine bits from MGCinematicFrameView. The fifth of these bits represents _entireBackBufferIsDirty.
+        //This is very misleading. ZKHookIvar will actually return a set of nine bits from MGCinematicFrameView. The fifth one is _entireBackBufferIsDirty.
         unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
         
         //Set the _entireBackBufferIsDirty bit to 1
         *Ivars |= 1UL << 4;
         
-        //In order for setting the _entireBackBufferIsDirty bit to actually fix window backgrounds, we need to run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded] (we use the former because I think it's more efficient) FOLLOWED BY the original [self displayIfNeeded] (via ZKOrig). Disabling screen updates between the two prevents a brief flash of no-background becoming visible.
-        //Consider, for a moment, how little sense this makes. To fix thie problem, we need to run a varation of displayIfNeeded followed by the normal displayIfNeeded! Which should be basically the same code! And in case you're wondering, yes, you _must_ call one and then the other—simply running either of them twice won't do it.
-        //But it works. So whatevs.
-        
+        //Disabling screen updates between these two steps prevents a brief flash of glitchiness.
         NSDisableScreenUpdates();
         [self displayIfNeededIgnoringOpacity];
         ZKOrig(void);
@@ -136,13 +211,28 @@ void startAudioDeviceChangedListener() {
     return ([[self window] _canBecomeFullScreen] != NULL);
 }
 
+- (void)setTitle:(id)arg1 {
+    //Swizzling init and dealloc methods causes bad things to happen, so we need another way to initialize stuff!
+    //Luckily, this method runs once when new views are created, and once when they are deallocated. Sooo...
+    
+    if (! hasSetup) {
+        [self ghettoInit];
+    }
+    else {
+        [self ghettoDealloc];
+    }
+    
+    ZKOrig(void, arg1);
+}
+
 @end
 
 
 
 @implementation myQTHUDSliderCell
 
-//By default, the volume slider doesn't work, and I can't figure out why. So, I've made it control the system volume instead, as it does on iOS. I don't consider this behavior better or worse, merely different—clearly, Apple thought it was worth doing on the iPhone.
+//By default, the volume slider doesn't work, and it doesn't seem to be fixable. So, I've made it control the system volume instead, a la iOS.
+//Frankly, I don't consider this behavior better or worse—it's just different.
 
 - (double)_QTHUDSliderValidateUserValue:(double)arg1 {
     [self setSystemVolume:arg1];
@@ -159,7 +249,7 @@ void startAudioDeviceChangedListener() {
 
 
 @implementation myMGScrollEventHandlingHUDSlider
-//We made QuickTime's volume slider corrospond to the system volume. To avoid accidents, let's remove some methods of changing the slider.
+//We made QuickTime's volume slider corrospond to the system volume. Remove some methods of changing the slider to avoid accidents.
 - (void)beginGestureWithEvent:(id)arg1 {}
 - (void)scrollWheel:(id)arg1 {}
 @end
@@ -168,7 +258,7 @@ void startAudioDeviceChangedListener() {
 
 @implementation myMGPlayerController
 
-//Again, we want to disable some ways to change the volume slider.
+//As above, we want to disable some ways to change the volume slider.
 - (void)increaseVolume:(id)arg {}
 - (void)decreaseVolume:(id)arg1 {}
 
@@ -187,7 +277,7 @@ void startAudioDeviceChangedListener() {
 
 
 
-@implementation myNSControl
+@implementation myQTHUDButton
 
 - (BOOL)becomeFirstResponder {
     return false;
@@ -202,15 +292,17 @@ void startAudioDeviceChangedListener() {
 + (void)load {
     ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
     ZKSwizzle(myQTHUDSliderCell, QTHUDSliderCell);
-    ZKSwizzle(myMGPlayerController, MGPlayerController);
     ZKSwizzle(myMGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
-    ZKSwizzle(myNSControl, QTHUDButton);
+    ZKSwizzle(myMGPlayerController, MGPlayerController);
+    ZKSwizzle(myQTHUDButton, QTHUDButton);
     
-    //Fix menu bar not switching to QuickTime
+    //Fix menu bar not switching to QuickTime.
     [[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
     
     startVolumeChangedListener();
     startAudioDeviceChangedListener();
+    
+    existingLegacyMediaBridgePIDs = [@[] mutableCopy];
 }
 
 @end
