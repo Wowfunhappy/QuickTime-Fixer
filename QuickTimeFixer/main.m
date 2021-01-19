@@ -16,6 +16,7 @@
     bool hasSetup;
     bool needsSetBackBufferDirty;
     bool needsUpdateVolume;
+    bool needsCheckWindowButtons;
     NSString *doNotUse2; //See above.
     NSString *ourLegacyMediaBridgePID;
 }
@@ -107,7 +108,7 @@ NSString* runShellCommand(NSString *command) {
 //This class (1) fixes graphical issues, and (2) tracks and kills legacyMediaBridge instances.
 //Graphical fixes were  discovered largely via brute-force trial and error, and I mostly don't understand why they work.
 
-- (void)ghettoInit {
+- (void)phonyInit {
     needsSetBackBufferDirty = true;
     needsUpdateVolume = true;
     
@@ -117,11 +118,15 @@ NSString* runShellCommand(NSString *command) {
     hasSetup = true;
 }
 
-- (void)ghettoDealloc {
+- (void)phonyDealloc {
     if ([ourLegacyMediaBridgePID length] > 0) {
         [existingLegacyMediaBridgePIDs removeObject:ourLegacyMediaBridgePID];
-        runShellCommand([NSString stringWithFormat:@"kill -n 2 %@", ourLegacyMediaBridgePID]);
+        [self performSelector:@selector(killProcess:) withObject:ourLegacyMediaBridgePID afterDelay:1];
     }
+}
+
+- (void)killProcess:(NSString*)pid {
+    runShellCommand([NSString stringWithFormat:@"kill -n 2 %@", pid]);
 }
 
 - (void)findLegacyMediaBridgePID {
@@ -129,7 +134,7 @@ NSString* runShellCommand(NSString *command) {
      close the legacymediabridge.videodecompression processes once it's done with them. They stick around, eating
      up small amounts of memory (~20mb each) until the user quits QuickTime.
      
-     To fix this, we need to close these processes ourself, which implies tracking their creation.
+     To fix this, we need to close these processes ourselves, which implies tracking their creation.
      To do so, we look for instances of legacymediabridge.videodecompression, and record their PIDs
      in a globally-accessible array. If we find exactly one PID which we haven't seen before, we can safely
      assume it belongs to us. This won't always work, but it doesn't really have to.*/
@@ -158,7 +163,7 @@ NSString* runShellCommand(NSString *command) {
 }
 
 - (void)displayIfNeeded {
-    if (needsSetBackBufferDirty | ([[self window]inLiveResize] && (![self canBecomeFullScreen])) ) {
+    if (needsSetBackBufferDirty | (/*[[self window]inLiveResize] &&*/ (![self canBecomeFullScreen])) ) {
         /*Window backgrounds are currently glitched. To fix them, we need to do the following:
             1. Set _entireBackBufferIsDirty bit
             2. Run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded].
@@ -175,7 +180,7 @@ NSString* runShellCommand(NSString *command) {
         //Set the _entireBackBufferIsDirty bit to 1
         *Ivars |= 1UL << 4;
         
-        //Disabling screen updates between these two steps prevents a brief flash of glitchiness.
+        //Disabling screen updates between these two prevents a brief flash of glitchiness.
         NSDisableScreenUpdates();
         [self displayIfNeededIgnoringOpacity];
         ZKOrig(void);
@@ -204,9 +209,25 @@ NSString* runShellCommand(NSString *command) {
         needsUpdateVolume = false;
     }
     
+    needsCheckWindowButtons = true;
+    [self unstickWindowButtonHoverState];
+    
     ZKOrig(void);
 }
 
+- (void)setFrameSize:(struct CGSize)arg1 {
+    needsCheckWindowButtons = true;
+    [self performSelector:@selector(unstickWindowButtonHoverState) withObject:nil afterDelay:0.7];
+    ZKOrig(void, arg1);
+}
+
+- (void)unstickWindowButtonHoverState {
+    if (needsCheckWindowButtons) {
+        //This won't always work—it depends on the location of the user's mouse at the time this code is run.
+        needsCheckWindowButtons = false;
+        [[self subviews][1] viewDidEndLiveResize];
+    }
+}
 - (bool)canBecomeFullScreen {
     return ([[self window] _canBecomeFullScreen] != NULL);
 }
@@ -216,10 +237,10 @@ NSString* runShellCommand(NSString *command) {
     //Luckily, this method runs once when new views are created, and once when they are deallocated. Sooo...
     
     if (! hasSetup) {
-        [self ghettoInit];
+        [self phonyInit];
     }
     else {
-        [self ghettoDealloc];
+        [self phonyDealloc];
     }
     
     ZKOrig(void, arg1);
@@ -239,7 +260,7 @@ NSString* runShellCommand(NSString *command) {
     return ZKOrig(double, arg1);
 }
 
-- (void) setSystemVolume: (double)volume {
+- (void)setSystemVolume:(double)volume {
     NSString *scriptText = [NSString stringWithFormat:@"set volume output volume %f * 100", volume];
     [[[NSAppleScript alloc] initWithSource:scriptText] executeAndReturnError:nil];
 }
@@ -278,11 +299,10 @@ NSString* runShellCommand(NSString *command) {
 
 
 @implementation myQTHUDButton
-
+//Disable the cause of a graphical glitch.
 - (BOOL)becomeFirstResponder {
     return false;
 }
-
 @end
 
 
