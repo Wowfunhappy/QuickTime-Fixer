@@ -11,6 +11,7 @@
 		AB43192B2590EAB100AE868B /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = AB4319292590EAB100AE868B /* main.m */; };
 		AB43192F2590EF0000AE868B /* ZKSwizzle.h in Headers */ = {isa = PBXBuildFile; fileRef = AB43192D2590EF0000AE868B /* ZKSwizzle.h */; };
 		AB4319302590EF0000AE868B /* ZKSwizzle.m in Sources */ = {isa = PBXBuildFile; fileRef = AB43192E2590EF0000AE868B /* ZKSwizzle.m */; };
+		ABE2558D25B74C78002DB594 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = ABE2558C25B74C78002DB594 /* AVFoundation.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +21,7 @@
 		AB4319292590EAB100AE868B /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		AB43192D2590EF0000AE868B /* ZKSwizzle.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ZKSwizzle.h; sourceTree = "<group>"; };
 		AB43192E2590EF0000AE868B /* ZKSwizzle.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ZKSwizzle.m; sourceTree = "<group>"; };
+		ABE2558C25B74C78002DB594 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -27,6 +29,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ABE2558D25B74C78002DB594 /* AVFoundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -36,6 +39,7 @@
 		AB4319002590EA1B00AE868B = {
 			isa = PBXGroup;
 			children = (
+				ABE2558C25B74C78002DB594 /* AVFoundation.framework */,
 				AB43190C2590EA1B00AE868B /* QuickTimeFixer */,
 				AB43190B2590EA1B00AE868B /* Products */,
 			);
