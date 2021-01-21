@@ -14,6 +14,9 @@
 - (id)_trackWithTrackID:(int)arg1;
 @end
 
+@interface myAVAssetExportSession : AVAssetExportSession
+@end
+
 @interface myMGCinematicFrameView : NSView
 {
     /*ZKSwizzle doesn't seem to handle instance variables properly. This is unfortunate, because we need them.
@@ -96,6 +99,15 @@ NSString* runShellCommand(NSString *command) {
 
 
 
+@implementation myAVAssetExportSession
+//Apple removed this method from AVFoundation, but all we need is the stub.
+
+- (void)setUsesHardwareVideoEncoderIfAvailable:(BOOL)arg1 {}
+
+@end
+
+
+
 @implementation myMGCinematicFrameView
 //In this class, we (1) fix graphical issues, and (2) track and kill legacyMediaBridge instances.
 //Graphical fixes were  discovered via trial and error, and I largely don't understand why they work.
@@ -118,6 +130,9 @@ NSString* runShellCommand(NSString *command) {
     
     ourLegacyMediaBridgePID = @"";
     [self performSelector:@selector(findLegacyMediaBridgePID) withObject:nil afterDelay:0.5];
+    
+    //A process that should, but does not, quit on its own. Unlike its cousin, it's easy to deal with.
+    runShellCommand(@"killall -SIGINT com.apple.legacymediabridge.componentregistry");
     
     hasSetup = true;
 }
@@ -269,6 +284,7 @@ NSString* runShellCommand(NSString *command) {
 
 + (void)load {
     ZKSwizzle(myAVPlayerItem, AVPlayerItem);
+    ZKSwizzle(myAVAssetExportSession, AVAssetExportSession);
     ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
     ZKSwizzle(myQTHUDButton, QTHUDButton);
     ZKSwizzle(myMGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
