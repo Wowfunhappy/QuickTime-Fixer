@@ -110,7 +110,7 @@ NSString* runShellCommand(NSString *command) {
 
 @implementation myMGCinematicFrameView
 //In this class, we (1) fix graphical issues, and (2) track and kill legacyMediaBridge instances.
-//Graphical fixes were  discovered via trial and error, and I largely don't understand why they work.
+//Graphical fixes were discovered via trial and error, and I largely don't understand why they work.
 
 - (void)setTitle:(id)arg1 {
     //Swizzling init and dealloc methods causes bad things to happen, so we need another way to initialize stuff!
@@ -118,6 +118,7 @@ NSString* runShellCommand(NSString *command) {
     
     if (! hasSetup) {
         [self phonyInit];
+        hasSetup = true;
     }
     else {
         [self phonyDealloc];
@@ -130,11 +131,6 @@ NSString* runShellCommand(NSString *command) {
     
     ourLegacyMediaBridgePID = @"";
     [self performSelector:@selector(findLegacyMediaBridgePID) withObject:nil afterDelay:0.5];
-    
-    //A process that should, but does not, quit on its own. Unlike its cousin, it's easy to deal with.
-    runShellCommand(@"killall -SIGINT com.apple.legacymediabridge.componentregistry");
-    
-    hasSetup = true;
 }
 
 - (void)phonyDealloc {
@@ -150,7 +146,7 @@ NSString* runShellCommand(NSString *command) {
 
 - (void)findLegacyMediaBridgePID {
     /*QuickTime interacts with QuickTime components via legacyMediaBridge.
-     On Mavericks, it won't close the legacymediabridge.videodecompression processes when it's done with them,
+     It won't close the legacymediabridge.videodecompression processes when it's done with them,
      so they waste ~ 20mb of memory each, until the user quits QuickTime.
      
      Which means we need to close them ourselves.
@@ -190,7 +186,7 @@ NSString* runShellCommand(NSString *command) {
             1. Set _entireBackBufferIsDirty to true.
             2. Run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded].
                 (We'll use the former, because I think it's more efficient.)
-            3. Run the original [self displayIfNeeded]
+            3. Run the original [self displayIfNeeded].
 
         Notably, steps two and three make no sense! We're running a varation of displayIfNeeded followed by the
         normal displayIfNeeded, which should be basically the same thing. And, yes, you _must_ call one and
@@ -246,6 +242,7 @@ NSString* runShellCommand(NSString *command) {
 - (void)unstickWindowButtonHoverState {
     if (needsCheckWindowButtons) {
         //This won't always work; it depends on the location of the user's mouse at the time this code is run.
+        //(This bug exists in Mountain Lion too, btw.)
         needsCheckWindowButtons = false;
         [[self subviews][1] viewDidEndLiveResize];
     }
