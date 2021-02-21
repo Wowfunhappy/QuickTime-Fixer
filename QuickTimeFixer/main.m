@@ -30,20 +30,23 @@
 }
 @end
 
-@interface myQTHUDButton : NSControl
-@end
-
 @interface myMGScrollEventHandlingHUDSlider : NSObject
 @end
 
 @interface myMGPlayerController : NSController
 @end
 
+@interface myQTHUDButton : NSControl
+@end
+
+@interface myNSWindow : NSWindow
+@end
+
 @interface NSWindow (quickTimeFixer)
 - (void)_makeLayerBacked;
 - (id)_canBecomeFullScreen;
+- (BOOL)_processKeyboardUIKey:(id)arg1;
 @end
-
 
 
 /*global*/
@@ -76,21 +79,23 @@ NSString* runShellCommand(NSString *command) {
 - (int)selectedTrackIDInTrackGroup:(id)trackGroup {
     NSArray *trackIds = [trackGroup trackIDs];
     for (int i = 0; i < [trackIds count]; i++) {
-        AVAssetTrack *currentTrack = [self _trackWithTrackID: [[trackIds objectAtIndex:i]intValue]];
+        int currTrackID = [[trackIds objectAtIndex:i]intValue];
+        AVAssetTrack *currentTrack = [self _trackWithTrackID: currTrackID];
         if ([currentTrack isEnabled]) {
-            return [[trackIds objectAtIndex:i]intValue];
+            return currTrackID;
         }
     }
     return -1;
 }
 
-- (void)selectTrackWithID:(int)trackNum inTrackGroup:(id)trackGroup {
+- (void)selectTrackWithID:(int)trackID inTrackGroup:(id)trackGroup {
     NSArray *trackIds = [trackGroup trackIDs];
     for (int i = 0; i < [trackIds count]; i++) {
-        if ([[trackIds objectAtIndex:i]intValue] == trackNum) {
-            [[self _trackWithTrackID: [[trackIds objectAtIndex:i]intValue]] setEnabled: true];
+        int currTrackID = [[trackIds objectAtIndex:i]intValue];
+        if (currTrackID == trackID) {
+            [[self _trackWithTrackID: currTrackID] setEnabled: true];
         } else {
-            [[self _trackWithTrackID: [[trackIds objectAtIndex:i]intValue]] setEnabled: false];
+            [[self _trackWithTrackID: currTrackID] setEnabled: false];
         }
     }
 }
@@ -252,15 +257,6 @@ NSString* runShellCommand(NSString *command) {
 
 
 
-@implementation myQTHUDButton
-//Disable the cause of a graphical glitch.
-- (BOOL)becomeFirstResponder {
-    return false;
-}
-@end
-
-
-
 @implementation myMGScrollEventHandlingHUDSlider
 //Prevent an audio glitch.
 - (void)beginGestureWithEvent:(id)arg1 {}
@@ -277,15 +273,36 @@ NSString* runShellCommand(NSString *command) {
 
 
 
+@implementation myQTHUDButton
+//Tabbing between QTHUDButtons can cause QuickTime to crash. This behavior is annoying anyway.
+- (BOOL)becomeFirstResponder {
+    return false;
+}
+@end
+
+
+
+@implementation myNSWindow
+//Continuation of above: Tabbing between QTHUDButtons can cause QuickTime to crash.
+- (void)selectKeyViewFollowingView:(id)arg1 {
+    if (strcmp(object_getClassName(arg1), "NSView") != 0) {
+        ZKOrig(void, arg1);
+    }
+}
+@end
+
+
+
 @implementation NSObject (main)
 
 + (void)load {
     ZKSwizzle(myAVPlayerItem, AVPlayerItem);
     ZKSwizzle(myAVAssetExportSession, AVAssetExportSession);
     ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
-    ZKSwizzle(myQTHUDButton, QTHUDButton);
     ZKSwizzle(myMGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
     ZKSwizzle(myMGPlayerController, MGPlayerController);
+    ZKSwizzle(myQTHUDButton, QTHUDButton);
+    ZKSwizzle(myNSWindow, NSWindow);
     
     //Fix menu bar not switching to QuickTime.
     [[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
