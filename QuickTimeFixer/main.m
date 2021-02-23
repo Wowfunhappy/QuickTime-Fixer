@@ -285,7 +285,7 @@ NSString* runShellCommand(NSString *command) {
 @implementation myNSWindow
 //Continuation of above: Tabbing between QTHUDButtons can cause QuickTime to crash.
 - (void)selectKeyViewFollowingView:(id)arg1 {
-    if (strcmp(object_getClassName(arg1), "NSView") != 0) {
+    if (strcmp(object_getClassName(arg1), "NSView") != 0 && strcmp(object_getClassName(arg1), "MGPlayPauseShuttleControllerView") != 0) {
         ZKOrig(void, arg1);
     }
 }
