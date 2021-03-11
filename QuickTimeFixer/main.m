@@ -133,12 +133,14 @@ NSString* runShellCommand(NSString *command) {
 
 - (void)phonyInit {
     needsSetBackBufferDirty = true;
+    [self runUserScript: @"userFileOpenedScript"];
     
     ourLegacyMediaBridgePID = @"";
     [self performSelector:@selector(findLegacyMediaBridgePID) withObject:nil afterDelay:0.5];
 }
 
 - (void)phonyDealloc {
+    [self runUserScript: @"userFileClosedScript"];
     if ([ourLegacyMediaBridgePID length] > 0) {
         [existingLegacyMediaBridgePIDs removeObject:ourLegacyMediaBridgePID];
         [self performSelector:@selector(killProcess:) withObject:ourLegacyMediaBridgePID afterDelay:1];
@@ -182,6 +184,14 @@ NSString* runShellCommand(NSString *command) {
                 }
             }
         }
+    }
+}
+
+- (void)runUserScript:(NSString*)scriptName {
+    NSString* path = [[NSBundle mainBundle] pathForResource:scriptName ofType:@"scpt"];
+    if (path != nil) {
+        NSDictionary *error;
+        [[[NSAppleScript alloc] initWithContentsOfURL:[NSURL fileURLWithPath:path] error:&error] executeAndReturnError:nil];
     }
 }
 
