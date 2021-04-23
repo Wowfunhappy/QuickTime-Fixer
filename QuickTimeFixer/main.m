@@ -17,16 +17,16 @@
 @interface myAVAssetExportSession : AVAssetExportSession
 @end
 
+@interface myMGDocumentViewController : NSViewController
+@end
+
 @interface myMGCinematicFrameView : NSView
 {
-    /*ZKSwizzle doesn't seem to handle instance variables properly. This is unfortunate, because we need them.
-     If you must add a new iVar, test carefully to ensure no one else is messing with them...*/
-    unsigned int doNotUse1; //Without this, other iVars get messed up.
+    /*Swizzled iVars aren't handled correctly and can be curropted. These appear to be safe, but avoid adding more!*/
+    unsigned int doNotUse1; //Without this, other iVars will be corrupted.
     bool hasSetup;
     bool needsSetBackBufferDirty;
     bool needsCheckWindowButtons;
-    NSString *doNotUse2; //See above.
-    NSString *ourLegacyMediaBridgePID;
 }
 @end
 
@@ -49,13 +49,14 @@
 @end
 
 
+
 /*global*/
 
 NSMutableArray *existingLegacyMediaBridgePIDs;
 
 NSString* runShellCommand(NSString *command) {
     NSTask *task = [[NSTask alloc] init];
-    task.environment = @{}; //If we don't reset this, launchd will try to inject QuickTimeFixer into our NSTask!
+    task.environment = @{}; //If we don't reset this, launchd may try to inject QuickTimeFixer into our NSTask!
     [task setLaunchPath:@"/bin/sh"];
     [task setArguments:@[@"-c", command]];
     
@@ -75,6 +76,7 @@ NSString* runShellCommand(NSString *command) {
 
 @implementation myAVPlayerItem
 //Apple removed these methods from AVFoundation, but QuickTime needs them!
+//(I'm really damn proud of myself for figuring out what these needed to do. It was a total shot in the dark.)
 
 - (int)selectedTrackIDInTrackGroup:(id)trackGroup {
     NSArray *trackIds = [trackGroup trackIDs];
@@ -113,38 +115,39 @@ NSString* runShellCommand(NSString *command) {
 
 
 
-@implementation myMGCinematicFrameView
-//In this class, we (1) fix graphical issues, and (2) track and kill legacyMediaBridge instances.
-//Graphical fixes were discovered via trial and error, and I largely don't understand why they work.
+@implementation myMGDocumentViewController
 
-- (void)setTitle:(id)arg1 {
-    //Swizzling init and dealloc methods causes bad things to happen, so we need another way to initialize stuff!
-    //Luckily, this method runs once when new views are created, and once when they are deallocated. Sooo...
+/*QuickTime interacts with QuickTime components via legacyMediaBridge.
+ It won't close the legacymediabridge.videodecompression processes when it's done with them,
+ so they waste ~ 20mb of memory each, until the user quits QuickTime.
+ 
+ Which means we need to close them ourselves.
+ Which means we need to know which ones can be safely closed.
+ Which means we need to track their creation.
+ 
+ We'll look for instances of legacymediabridge.videodecompression, and record their PIDs in a globally-
+ accessible array. If we find exactly one PID which we haven't seen before, we can safely assume it belongs
+ to us. This won't always work, but it doesn't have to.*/
+
+static NSString *ourLegacyMediaBridgePID;
+
+- (void)loadView {
+    objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, @"", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self performSelector:@selector(findLegacyMediaBridgePID) withObject:nil afterDelay:0.5];
     
-    if (! hasSetup) {
-        [self phonyInit];
-        hasSetup = true;
-    }
-    else {
-        [self phonyDealloc];
-    }
-    ZKOrig(void, arg1);
-}
-
-- (void)phonyInit {
-    needsSetBackBufferDirty = true;
     [self runUserScript: @"userFileOpenedScript"];
     
-    ourLegacyMediaBridgePID = @"";
-    [self performSelector:@selector(findLegacyMediaBridgePID) withObject:nil afterDelay:0.5];
+    ZKOrig(void);
 }
 
-- (void)phonyDealloc {
+- (void)close {
     [self runUserScript: @"userFileClosedScript"];
-    if ([ourLegacyMediaBridgePID length] > 0) {
-        [existingLegacyMediaBridgePIDs removeObject:ourLegacyMediaBridgePID];
-        [self performSelector:@selector(killProcess:) withObject:ourLegacyMediaBridgePID afterDelay:1];
+    if ([objc_getAssociatedObject(self, &ourLegacyMediaBridgePID) length] > 0) {
+        [existingLegacyMediaBridgePIDs removeObject:objc_getAssociatedObject(self, &ourLegacyMediaBridgePID)];
+        [self performSelector:@selector(killProcess:) withObject:objc_getAssociatedObject(self, &ourLegacyMediaBridgePID) afterDelay:1];
     }
+    
+    ZKOrig(void);
 }
 
 - (void)killProcess:(NSString*)pid {
@@ -152,17 +155,6 @@ NSString* runShellCommand(NSString *command) {
 }
 
 - (void)findLegacyMediaBridgePID {
-    /*QuickTime interacts with QuickTime components via legacyMediaBridge.
-     It won't close the legacymediabridge.videodecompression processes when it's done with them,
-     so they waste ~ 20mb of memory each, until the user quits QuickTime.
-     
-     Which means we need to close them ourselves.
-     Which means we need to know which ones can be safely closed.
-     Which means we need to track their creation.
-     
-     We'll look for instances of legacymediabridge.videodecompression, and record their PIDs in a globally-
-     accessible array. If we find exactly one PID which we haven't seen before, we can safely assume it belongs
-     to us. This won't always work, but it doesn't have to.*/
     
     NSString *stringOfFoundPIDs = runShellCommand(@"ps -A | grep -v grep | grep com.apple.legacymediabridge.videodecompression | awk '{print $1;}'");
     stringOfFoundPIDs = [stringOfFoundPIDs stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -176,11 +168,11 @@ NSString* runShellCommand(NSString *command) {
                 [existingLegacyMediaBridgePIDs addObject:foundPID];
                 if (! alreadyFoundAUniquePID) {
                     alreadyFoundAUniquePID = true;
-                    ourLegacyMediaBridgePID = foundPID;
+                    objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, foundPID, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 } else {
                     /*We found a unique PID, but we already found one! The user probably opened multiple
-                    videos at once; there's no way to know which one is ours.*/
-                    ourLegacyMediaBridgePID = @"";
+                     videos at once; there's no way to know which one is ours.*/
+                    objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, @"", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 }
             }
         }
@@ -195,17 +187,35 @@ NSString* runShellCommand(NSString *command) {
     }
 }
 
+@end
+
+
+
+@implementation myMGCinematicFrameView
+/*In this class, we correct graphical issues using fixes discovered via trial and error.*/
+
+- (void)setTitle:(id)arg1 {
+    //Swizzling init and dealloc methods causes bad things to happen. Luckily, this method runs once when new views are created.
+    
+    if (! hasSetup) {
+        hasSetup = true;
+        needsSetBackBufferDirty = true;
+    }
+    
+    ZKOrig(void, arg1);
+}
+
 - (void)displayIfNeeded {
     if ( needsSetBackBufferDirty || ![self canBecomeFullScreen] ) {
         /*This is where we fix a majority of the graphical glitches. We need to:
-            1. Set _entireBackBufferIsDirty to true.
-            2. Run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded].
-                (We'll use the former, because I think it's more efficient.)
-            3. Run the original [self displayIfNeeded].
-
-        Notably, steps two and three make no sense! We're running a varation of displayIfNeeded followed by the
-        normal displayIfNeeded, which should be basically the same thing. And, yes, you _must_ call one and
-        then the other—running either twice is not sufficient.*/
+         1. Set _entireBackBufferIsDirty to true.
+         2. Run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded].
+         (We'll use the former, because I think it's more efficient.)
+         3. Run the original [self displayIfNeeded].
+         
+         Notably, steps two and three make no sense! We're running a varation of displayIfNeeded followed by the
+         normal displayIfNeeded, which should be basically the same thing. And, yes, you _must_ call one and
+         then the other—running either twice is not sufficient.*/
         
         //This is very misleading. ZKHookIvar will return a set of nine (!) bits from MGCinematicFrameView.
         //The fifth of these bits represents _entireBackBufferIsDirty.
@@ -277,7 +287,7 @@ NSString* runShellCommand(NSString *command) {
 
 @implementation myMGPlayerController
 //Prevent an audio glitch.
-- (void)increaseVolume:(id)arg {}
+- (void)increaseVolume:(id)arg1 {}
 - (void)decreaseVolume:(id)arg1 {}
 @end
 
@@ -308,6 +318,7 @@ NSString* runShellCommand(NSString *command) {
 + (void)load {
     ZKSwizzle(myAVPlayerItem, AVPlayerItem);
     ZKSwizzle(myAVAssetExportSession, AVAssetExportSession);
+    ZKSwizzle(myMGDocumentViewController, MGDocumentViewController);
     ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
     ZKSwizzle(myMGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
     ZKSwizzle(myMGPlayerController, MGPlayerController);
