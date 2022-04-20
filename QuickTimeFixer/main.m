@@ -10,6 +10,8 @@
 #import <AVFoundation/AVFoundation.h>
 #import "ZKSwizzle.h"
 
+
+
 @interface myAVPlayerItem : AVPlayerItem
 - (id)_trackWithTrackID:(int)arg1;
 @end
@@ -48,6 +50,10 @@
 - (BOOL)_processKeyboardUIKey:(id)arg1;
 @end
 
+@interface myMGDocumentWindowController : NSWindowController
+- (void)toggleFloating:(id)arg1;
+@end
+
 
 
 /*global*/
@@ -76,7 +82,6 @@ NSString* runShellCommand(NSString *command) {
 
 @implementation myAVPlayerItem
 //Apple removed these methods from AVFoundation, but QuickTime needs them!
-//(I'm really damn proud of myself for figuring out what these needed to do. It was a total shot in the dark.)
 
 - (int)selectedTrackIDInTrackGroup:(id)trackGroup {
     NSArray *trackIds = [trackGroup trackIDs];
@@ -115,21 +120,21 @@ NSString* runShellCommand(NSString *command) {
 
 
 
+static NSString *ourLegacyMediaBridgePID;
 @implementation myMGDocumentViewController
 
-/*QuickTime interacts with QuickTime components via legacyMediaBridge.
- It won't close the legacymediabridge.videodecompression processes when it's done with them,
- so they waste ~ 20mb of memory each, until the user quits QuickTime.
+/*QuickTime interacts with QuickTime components via legacyMediaBridge processes.
+ Unfortunately, when the QuickTime document associated with a legacymediabridge.videodecompression process is closed,
+ the legacymediabridge.videodecompression process keeps running, wasting around 20mb of memory (per process)
+ until the user quits QuickTime. This bug can be observed in vanilla QuickTime 10.2 on Mountain Lion. ;)
  
- Which means we need to close them ourselves.
- Which means we need to know which ones can be safely closed.
- Which means we need to track their creation.
- 
- We'll look for instances of legacymediabridge.videodecompression, and record their PIDs in a globally-
- accessible array. If we find exactly one PID which we haven't seen before, we can safely assume it belongs
- to us. This won't always work, but it doesn't have to.*/
-
-static NSString *ourLegacyMediaBridgePID;
+ To fix Apple's bug, need to kill these legacyMediaBridge processes when they are no longer needed.
+ To do that, we need to know which processes are no longer needed.
+ To do that, we need to know which processes are associated with which documents.
+ To do that, we need to track when each process was created.
+ To do that, we'll look for instances of legacymediabridge.videodecompression every time a new document is opened,
+ and record their PIDs in a globally-accessible array. If we find exactly one PID which we haven't seen before,
+ we'll assume the new process belongs to our new document. This won't always work, but it doesn't have to.*/
 
 - (void)loadView {
     objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, @"", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -142,7 +147,7 @@ static NSString *ourLegacyMediaBridgePID;
 
 - (void)close {
     [self runUserScript: @"userFileClosedScript"];
-    if ([objc_getAssociatedObject(self, &ourLegacyMediaBridgePID) length] > 0) {
+    if (objc_getAssociatedObject(self, &ourLegacyMediaBridgePID) != nil) {
         [existingLegacyMediaBridgePIDs removeObject:objc_getAssociatedObject(self, &ourLegacyMediaBridgePID)];
         [self performSelector:@selector(killProcess:) withObject:objc_getAssociatedObject(self, &ourLegacyMediaBridgePID) afterDelay:1];
     }
@@ -170,9 +175,9 @@ static NSString *ourLegacyMediaBridgePID;
                     alreadyFoundAUniquePID = true;
                     objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, foundPID, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 } else {
-                    /*We found a unique PID, but we already found one! The user probably opened multiple
-                     videos at once; there's no way to know which one is ours.*/
-                    objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, @"", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    /*We found a unique PID, but we already found one!
+                     The user probably opened multiple videos at once. There's no way to know which one is ours.*/
+                    objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 }
             }
         }
@@ -192,7 +197,8 @@ static NSString *ourLegacyMediaBridgePID;
 
 
 @implementation myMGCinematicFrameView
-/*In this class, we correct graphical issues using fixes discovered via trial and error.*/
+/*In this class, we correct graphical issues using fixes discovered via trial and error.
+  The timing of when these fixes are needed is very specific!*/
 
 - (void)setTitle:(id)arg1 {
     //Swizzling init and dealloc methods causes bad things to happen. Luckily, this method runs once when new views are created.
@@ -200,6 +206,9 @@ static NSString *ourLegacyMediaBridgePID;
     if (! hasSetup) {
         hasSetup = true;
         needsSetBackBufferDirty = true;
+        
+        //Fixes fullscreen animations glitches. See also: myMGDocumentWindowController
+        [[self window] _makeLayerBacked];
     }
     
     ZKOrig(void, arg1);
@@ -210,7 +219,7 @@ static NSString *ourLegacyMediaBridgePID;
         /*This is where we fix a majority of the graphical glitches. We need to:
          1. Set _entireBackBufferIsDirty to true.
          2. Run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded].
-         (We'll use the former, because I think it's more efficient.)
+            (We'll use the former, because I think it's more efficient?)
          3. Run the original [self displayIfNeeded].
          
          Notably, steps two and three make no sense! We're running a varation of displayIfNeeded followed by the
@@ -239,14 +248,6 @@ static NSString *ourLegacyMediaBridgePID;
 
 - (void)_windowChangedKeyState {
     needsSetBackBufferDirty = true;
-    
-    //Fixes fullscreen animations.
-    if ([self canBecomeFullScreen]) {
-        [[self window] _makeLayerBacked];
-    }
-    
-    //Fixes window shadows.
-    [[self window]update];
     
     needsCheckWindowButtons = true;
     [self unstickWindowButtonHoverState];
@@ -309,8 +310,24 @@ static NSString *ourLegacyMediaBridgePID;
         ZKOrig(void, arg1);
     }
 }
+
 @end
 
+
+
+@implementation myMGDocumentWindowController
+
+- (id)customWindowsToEnterFullScreenForWindow:(id)arg1 {
+    if (ZKHookIvar(self, int, "_isFloating")) {
+        [self toggleFloating:nil];
+    }
+    
+    //Fixes fullscreen animation glitches. See also: myMGCinematicFrameView.
+    [[self window] _makeLayerBacked];
+    return ZKOrig(id, arg1);
+}
+
+@end
 
 
 @implementation NSObject (main)
@@ -324,6 +341,7 @@ static NSString *ourLegacyMediaBridgePID;
     ZKSwizzle(myMGPlayerController, MGPlayerController);
     ZKSwizzle(myQTHUDButton, QTHUDButton);
     ZKSwizzle(myNSWindow, NSWindow);
+    ZKSwizzle(myMGDocumentWindowController, MGDocumentWindowController);
     
     //Fix menu bar not switching to QuickTime.
     [[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
