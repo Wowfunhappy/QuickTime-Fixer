@@ -198,7 +198,7 @@ static NSString *ourLegacyMediaBridgePID;
 
 @implementation myMGCinematicFrameView
 /*In this class, we correct graphical issues using fixes discovered via trial and error.
-  The timing of when these fixes are needed is very specific!*/
+ The timing of when these fixes are needed is very specific!*/
 
 - (void)setTitle:(id)arg1 {
     //Swizzling init and dealloc methods causes bad things to happen. Luckily, this method runs once when new views are created.
@@ -207,11 +207,19 @@ static NSString *ourLegacyMediaBridgePID;
         hasSetup = true;
         needsSetBackBufferDirty = true;
         
-        //Fixes fullscreen animations glitches. See also: myMGDocumentWindowController
-        [[self window] _makeLayerBacked];
+        [self performSelector:@selector(finishSetup) withObject:nil afterDelay:0.1];
+
     }
     
     ZKOrig(void, arg1);
+}
+
+
+- (void)finishSetup {
+    //Fixes fullscreen animations glitches. See also: myMGDocumentWindowController
+    if ([self canBecomeFullScreen]) {
+        [[self window] _makeLayerBacked];
+    }
 }
 
 - (void)displayIfNeeded {
@@ -219,7 +227,7 @@ static NSString *ourLegacyMediaBridgePID;
         /*This is where we fix a majority of the graphical glitches. We need to:
          1. Set _entireBackBufferIsDirty to true.
          2. Run either [self displayIfNeededIgnoringOpacity] or [super displayIfNeeded].
-            (We'll use the former, because I think it's more efficient?)
+         (We'll use the former, because I think it's more efficient?)
          3. Run the original [self displayIfNeeded].
          
          Notably, steps two and three make no sense! We're running a varation of displayIfNeeded followed by the
