@@ -24,12 +24,11 @@
 
 @interface myMGCinematicFrameView : NSView
 {
-	/*Swizzled iVars aren't handled correctly and can be curropted. These appear to be safe, but avoid adding more!*/
 	unsigned int doNotUse1; //Without this, other iVars will be corrupted.
-	bool hasSetup;
-	bool needsSetBackBufferDirty;
-	bool needsCheckWindowButtons;
+	bool needsCheckWindowButtons; //As many as three bools appears to be safe.
+	bool needsSetHasAutoCanDrawSubviewsIntoLayer;
 }
+- (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
 @end
 
 @interface myMGScrollEventHandlingHUDSlider : NSObject
@@ -48,7 +47,6 @@
 - (void)_makeLayerBacked;
 - (id)_canBecomeFullScreen;
 - (BOOL)_processKeyboardUIKey:(id)arg1;
-- (id)_borderView;
 @end
 
 @interface _borderView : NSView
@@ -117,8 +115,8 @@ NSString* runShellCommand(NSString *command) {
 
 
 @implementation myAVAssetExportSession
-//Apple removed this method from AVFoundation, but all we need is the stub.
 
+//Apple removed this method from AVFoundation, but all we need is the stub.
 - (void)setUsesHardwareVideoEncoderIfAvailable:(BOOL)arg1 {}
 
 @end
@@ -206,18 +204,14 @@ static NSString *ourLegacyMediaBridgePID;
  The timing of when these fixes are needed is very specific!*/
 
 - (void)setTitle:(id)arg1 {
-	//Swizzling init and dealloc methods causes bad things to happen. Luckily, this method runs once when new views are created.
-	
-	if (! hasSetup) {
-		hasSetup = true;
-		needsSetBackBufferDirty = true;
-	}
-	
+	needsSetHasAutoCanDrawSubviewsIntoLayer = true;
 	ZKOrig(void, arg1);
 }
 
 - (void)displayIfNeeded {
-	if ( needsSetBackBufferDirty || ![self canBecomeFullScreen] ) {
+	
+	if ( [[self window] _canBecomeFullScreen] == NULL ) {
+		//Fix non-video documents displaying without a background.
 		
 		//This is very misleading. ZKHookIvar will return a set of nine (!) bits from MGCinematicFrameView.
 		//The fifth of these bits represents _entireBackBufferIsDirty.
@@ -226,35 +220,34 @@ static NSString *ourLegacyMediaBridgePID;
 		//Set the _entireBackBufferIsDirty bit to 1
 		*Ivars |= 1UL << 4;
 		
-		//Disabling screen updates between these two steps prevents a brief flash of glitchiness.
+		// Disabling screen updates here prevents a brief flash of glitchiness.
 		NSDisableScreenUpdates();
 		[super displayIfNeeded];
 		ZKOrig(void);
 		NSEnableScreenUpdates();
 		
-		needsSetBackBufferDirty = false;
+		// I think I might finally semi-understand why this works. Decompilers show that [self displayIfNeeded]
+		// calls [super displayIfNeeded] at the end. I think [super displayIfNeeded] re-breaks whatever
+		// [self displayIfNeeded] fixes. However, [super displayIfNeeded] won't do anything if it's not "needed"!
+		// By calling the super implementation first, we prevent it from being necessary later, and so the breakage
+		// happen before the fix instead of the other way around. If we also disable screen updates during the
+		// brief moment of breakage, it never becomes visible to the user.
 	}
 	else {
+		if (needsSetHasAutoCanDrawSubviewsIntoLayer) {
+			//Fix FullScreen animation glitch
+			[self _setHasAutoCanDrawSubviewsIntoLayer:true];
+			needsSetHasAutoCanDrawSubviewsIntoLayer = false;
+		}
 		ZKOrig(void);
 	}
 }
 
 - (void)_windowChangedKeyState {
-	needsSetBackBufferDirty = true;
-	
 	needsCheckWindowButtons = true;
 	[self unstickWindowButtonHoverState];
 	
-	if ([self canBecomeFullScreen]) {
-		//Fixes fullscreen animation glitch
-		[[[super window] _borderView] _setHasAutoCanDrawSubviewsIntoLayer:true];
-	}
-	
 	ZKOrig(void);
-}
-
-- (bool)canBecomeFullScreen {
-	return ([[self window] _canBecomeFullScreen] != NULL);
 }
 
 - (void)setFrameSize:(struct CGSize)arg1 {
@@ -302,11 +295,19 @@ static NSString *ourLegacyMediaBridgePID;
 
 
 @implementation myNSWindow
+
 //Continuation of above: Tabbing between QTHUDButtons can cause QuickTime to crash.
 - (void)selectKeyViewFollowingView:(id)arg1 {
 	if (strcmp(object_getClassName(arg1), "NSView") != 0 && strcmp(object_getClassName(arg1), "MGPlayPauseShuttleControllerView") != 0) {
 		ZKOrig(void, arg1);
 	}
+}
+
+- (void)_windowTransformAnimationDidEnd:(id)arg1 {
+	if ([self _canBecomeFullScreen] != NULL) {
+		[self invalidateShadow];
+	}
+	ZKOrig(void, arg1);
 }
 
 @end
