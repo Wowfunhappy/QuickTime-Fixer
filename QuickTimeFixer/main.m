@@ -62,34 +62,6 @@
 
 
 
-/*global*/
-
-NSMutableArray *existingLegacyMediaBridgePIDs;
-
-NSString* runShellCommand(NSString *command, BOOL waitUntilDone) {
-	NSTask *task = [[NSTask alloc] init];
-	task.environment = @{}; //If we don't reset this, launchd may try to inject QuickTimeFixer into our NSTask!
-	[task setLaunchPath:@"/bin/sh"];
-	[task setArguments:@[@"-c", command]];
-	
-	NSPipe *pipe = [[NSPipe alloc] init];
-	NSFileHandle *fileHandle = [pipe fileHandleForReading];
-	[task setStandardOutput:pipe];
-	[task launch];
-	
-	if (waitUntilDone) {
-		[task waitUntilExit];
-		
-		NSData *data = [fileHandle readDataToEndOfFile];
-		return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-	} else {
-		return @"";
-	}
-}
-
-/*end global*/
-
-
 
 @implementation myAVPlayerItem
 //Apple removed these methods from AVFoundation, but QuickTime needs them!
@@ -131,68 +103,16 @@ NSString* runShellCommand(NSString *command, BOOL waitUntilDone) {
 
 
 
-static NSString *ourLegacyMediaBridgePID;
 @implementation myMGDocumentViewController
 
-/*QuickTime interacts with QuickTime components via legacyMediaBridge processes.
- Unfortunately, when the QuickTime document associated with a legacymediabridge.videodecompression process is closed,
- the legacymediabridge.videodecompression process keeps running, wasting around 20mb of memory (per process)
- until the user quits QuickTime. This bug can be observed in vanilla QuickTime 10.2 on Mountain Lion. ;)
- 
- To fix Apple's bug, need to kill these legacyMediaBridge processes when they are no longer needed.
- To do that, we need to know which processes are no longer needed.
- To do that, we need to know which processes are associated with which documents.
- To do that, we need to track when each process was created.
- To do that, we'll look for instances of legacymediabridge.videodecompression every time a new document is opened,
- and record their PIDs in a globally-accessible array. If we find exactly one PID which we haven't seen before,
- we'll assume the new process belongs to our new document. This won't always work, but it doesn't have to.*/
-
 - (void)loadView {
-	objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, @"", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	[self performSelector:@selector(findLegacyMediaBridgePID) withObject:nil afterDelay:0.5];
-	
 	[self runUserScript: @"userFileOpenedScript"];
-	
 	ZKOrig(void);
 }
 
 - (void)close {
 	[self runUserScript: @"userFileClosedScript"];
-	if (objc_getAssociatedObject(self, &ourLegacyMediaBridgePID) != nil) {
-		[existingLegacyMediaBridgePIDs removeObject:objc_getAssociatedObject(self, &ourLegacyMediaBridgePID)];
-		[self performSelector:@selector(killProcess:) withObject:objc_getAssociatedObject(self, &ourLegacyMediaBridgePID) afterDelay:1];
-	}
-	
 	ZKOrig(void);
-}
-
-- (void)killProcess:(NSString*)pid {
-	runShellCommand([NSString stringWithFormat:@"kill -n 2 %@", pid], false);
-}
-
-- (void)findLegacyMediaBridgePID {
-	
-	NSString *stringOfFoundPIDs = runShellCommand(@"ps -A | grep -v grep | grep com.apple.legacymediabridge.videodecompression | awk '{print $1;}'", true);
-	stringOfFoundPIDs = [stringOfFoundPIDs stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-	if ([stringOfFoundPIDs length] > 0){
-		NSArray *foundPIDs = [stringOfFoundPIDs componentsSeparatedByString:@"\n"];
-		
-		bool alreadyFoundAUniquePID = false;
-		for (int i = 0; i < [foundPIDs count]; i++) {
-			if (![existingLegacyMediaBridgePIDs containsObject:[foundPIDs objectAtIndex:i]]){
-				NSString *foundPID = [foundPIDs objectAtIndex:i];
-				[existingLegacyMediaBridgePIDs addObject:foundPID];
-				if (! alreadyFoundAUniquePID) {
-					alreadyFoundAUniquePID = true;
-					objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, foundPID, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-				} else {
-					/*We found a unique PID, but we already found one!
-					 The user probably opened multiple videos at once. There's no way to know which one is ours.*/
-					objc_setAssociatedObject(self, &ourLegacyMediaBridgePID, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-				}
-			}
-		}
-	}
 }
 
 - (void)runUserScript:(NSString*)scriptName {
@@ -212,7 +132,6 @@ static NSString *ourLegacyMediaBridgePID;
  The timing of when these fixes are needed is very specific!*/
 
 - (void)setTitle:(id)arg1 {
-	
 	needsSetHasAutoCanDrawSubviewsIntoLayer = true;
 	ZKOrig(void, arg1);
 }
@@ -362,8 +281,6 @@ static NSString *ourLegacyMediaBridgePID;
 	
 	//Fix menu bar not switching to QuickTime.
 	[[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
-	
-	existingLegacyMediaBridgePIDs = [@[] mutableCopy];
 }
 
 @end
