@@ -12,17 +12,17 @@
 
 
 
-@interface myAVPlayerItem : AVPlayerItem
+@interface QTFixer_AVPlayerItem : AVPlayerItem
 - (id)_trackWithTrackID:(int)arg1;
 @end
 
-@interface myAVAssetExportSession : AVAssetExportSession
+@interface QTFixer_AVAssetExportSession : AVAssetExportSession
 @end
 
-@interface myMGDocumentViewController : NSViewController
+@interface QTFixer_MGDocumentViewController : NSViewController
 @end
 
-@interface myMGCinematicFrameView : NSView
+@interface QTFixer_MGCinematicFrameView : NSView
 {
 	unsigned int doNotUse1; //Without this, other iVars will be corrupted.
 	bool needsCheckWindowButtons; //As many as three bools appears to be safe.
@@ -31,19 +31,19 @@
 - (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
 @end
 
-@interface myMGCinematicWindow : NSWindow
+@interface QTFixer_MGCinematicWindow : NSWindow
 @end
 
-@interface myMGScrollEventHandlingHUDSlider : NSObject
+@interface QTFixer_MGScrollEventHandlingHUDSlider : NSObject
 @end
 
-@interface myMGPlayerController : NSController
+@interface QTFixer_MGPlayerController : NSController
 @end
 
-@interface myQTHUDButton : NSControl
+@interface QTFixer_QTHUDButton : NSControl
 @end
 
-@interface myNSWindow : NSWindow
+@interface QTFixer_NSWindow : NSWindow
 @end
 
 @interface NSWindow (quickTimeFixer)
@@ -56,14 +56,14 @@
 - (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
 @end
 
-@interface myMGDocumentWindowController : NSWindowController
+@interface QTFixer_MGDocumentWindowController : NSWindowController
 - (void)toggleFloating:(id)arg1;
 @end
 
 
 
 
-@implementation myAVPlayerItem
+@implementation QTFixer_AVPlayerItem
 //Apple removed these methods from AVFoundation, but QuickTime needs them!
 
 - (int)selectedTrackIDInTrackGroup:(id)trackGroup {
@@ -94,7 +94,7 @@
 
 
 
-@implementation myAVAssetExportSession
+@implementation QTFixer_AVAssetExportSession
 
 //Apple removed this method from AVFoundation, but all we need is the stub.
 - (void)setUsesHardwareVideoEncoderIfAvailable:(BOOL)arg1 {}
@@ -103,7 +103,7 @@
 
 
 
-@implementation myMGDocumentViewController
+@implementation QTFixer_MGDocumentViewController
 
 - (void)loadView {
 	[self runUserScript: @"userFileOpenedScript"];
@@ -127,7 +127,7 @@
 
 
 
-@implementation myMGCinematicFrameView
+@implementation QTFixer_MGCinematicFrameView
 /*In this class, we correct graphical issues using fixes discovered via trial and error.
  The timing of when these fixes are needed is very specific!*/
 
@@ -197,7 +197,7 @@
 
 
 
-@implementation myMGCinematicWindow
+@implementation QTFixer_MGCinematicWindow
 
 - (void)_windowTransformAnimationDidEnd:(id)arg1 {
 	if ([self _canBecomeFullScreen] != NULL) {
@@ -213,7 +213,7 @@
 
 
 
-@implementation myMGScrollEventHandlingHUDSlider
+@implementation QTFixer_MGScrollEventHandlingHUDSlider
 //Prevent an audio glitch.
 - (void)beginGestureWithEvent:(id)arg1 {}
 - (void)scrollWheel:(id)arg1 {}
@@ -221,7 +221,7 @@
 
 
 
-@implementation myMGPlayerController
+@implementation QTFixer_MGPlayerController
 //Prevent an audio glitch.
 - (void)increaseVolume:(id)arg1 {}
 - (void)decreaseVolume:(id)arg1 {}
@@ -229,7 +229,7 @@
 
 
 
-@implementation myQTHUDButton
+@implementation QTFixer_QTHUDButton
 //Tabbing between QTHUDButtons can cause QuickTime to crash. This behavior is annoying anyway.
 - (BOOL)becomeFirstResponder {
 	return false;
@@ -238,7 +238,7 @@
 
 
 
-@implementation myNSWindow
+@implementation QTFixer_NSWindow
 
 //Continuation of above: Tabbing between QTHUDButtons can cause QuickTime to crash.
 - (void)selectKeyViewFollowingView:(id)arg1 {
@@ -251,7 +251,7 @@
 
 
 
-@implementation myMGDocumentWindowController
+@implementation QTFixer_MGDocumentWindowController
 
 - (id)customWindowsToEnterFullScreenForWindow:(id)arg1 {
 	if (ZKHookIvar(self, int, "_isFloating")) {
@@ -268,16 +268,16 @@
 @implementation NSObject (main)
 
 + (void)load {
-	ZKSwizzle(myAVPlayerItem, AVPlayerItem);
-	ZKSwizzle(myAVAssetExportSession, AVAssetExportSession);
-	ZKSwizzle(myMGDocumentViewController, MGDocumentViewController);
-	ZKSwizzle(myMGCinematicFrameView, MGCinematicFrameView);
-	ZKSwizzle(myMGCinematicWindow, MGCinematicWindow);
-	ZKSwizzle(myMGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
-	ZKSwizzle(myMGPlayerController, MGPlayerController);
-	ZKSwizzle(myQTHUDButton, QTHUDButton);
-	ZKSwizzle(myNSWindow, NSWindow);
-	ZKSwizzle(myMGDocumentWindowController, MGDocumentWindowController);
+	ZKSwizzle(QTFixer_AVPlayerItem, AVPlayerItem);
+	ZKSwizzle(QTFixer_AVAssetExportSession, AVAssetExportSession);
+	ZKSwizzle(QTFixer_MGDocumentViewController, MGDocumentViewController);
+	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
+	ZKSwizzle(QTFixer_MGCinematicWindow, MGCinematicWindow);
+	ZKSwizzle(QTFixer_MGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
+	ZKSwizzle(QTFixer_MGPlayerController, MGPlayerController);
+	ZKSwizzle(QTFixer_QTHUDButton, QTHUDButton);
+	ZKSwizzle(QTFixer_NSWindow, NSWindow);
+	ZKSwizzle(QTFixer_MGDocumentWindowController, MGDocumentWindowController);
 	
 	//Fix menu bar not switching to QuickTime.
 	[[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
