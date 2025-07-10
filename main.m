@@ -11,36 +11,7 @@
 #import <objc/runtime.h>
 #import "ZKSwizzle/ZKSwizzle.h"
 
-
-
-@interface QTFixer_AVPlayerItem : AVPlayerItem
-- (id)_trackWithTrackID:(int)arg1;
-@end
-
-@interface QTFixer_AVAssetExportSession : AVAssetExportSession
-@end
-
-@interface QTFixer_MGDocumentViewController : NSViewController
-@end
-
-@interface QTFixer_MGCinematicFrameView : NSView
-- (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
-@end
-
-@interface QTFixer_MGCinematicWindow : NSWindow
-@end
-
-@interface QTFixer_MGScrollEventHandlingHUDSlider : NSObject
-@end
-
-@interface QTFixer_MGPlayerController : NSController
-@end
-
-@interface QTFixer_QTHUDButton : NSControl
-@end
-
-@interface QTFixer_NSWindow : NSWindow
-@end
+#define EMPTY_SWIZZLE_INTERFACE(CLASS_NAME, SUPERCLASS) @interface CLASS_NAME : SUPERCLASS @end
 
 @interface NSWindow (quickTimeFixer)
 - (void)_makeLayerBacked;
@@ -52,12 +23,12 @@
 - (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
 @end
 
-@interface QTFixer_MGDocumentWindowController : NSWindowController
-- (void)toggleFloating:(id)arg1;
+
+
+
+@interface QTFixer_AVPlayerItem : AVPlayerItem
+- (id)_trackWithTrackID:(int)arg1;
 @end
-
-
-
 
 @implementation QTFixer_AVPlayerItem
 //Apple removed these methods from AVFoundation, but QuickTime needs them!
@@ -90,6 +61,8 @@
 
 
 
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_AVAssetExportSession, AVAssetExportSession);
 @implementation QTFixer_AVAssetExportSession
 
 //Apple removed this method from AVFoundation, but all we need is the stub.
@@ -99,7 +72,8 @@
 
 
 
-static const char kNeedsCheckWindowButtonsKey;
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 @implementation QTFixer_MGDocumentViewController
 
 - (void)loadView {
@@ -123,6 +97,12 @@ static const char kNeedsCheckWindowButtonsKey;
 @end
 
 
+
+
+static const char kNeedsCheckWindowButtonsKey;
+@interface QTFixer_MGCinematicFrameView : NSView
+- (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
+@end
 
 @implementation QTFixer_MGCinematicFrameView
 /*In this class, we correct graphical issues using fixes discovered via trial and error.
@@ -199,6 +179,8 @@ static const char kNeedsCheckWindowButtonsKey;
 
 
 
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGCinematicWindow, NSWindow);
 @implementation QTFixer_MGCinematicWindow
 
 - (void)_windowTransformAnimationDidEnd:(id)arg1 {
@@ -216,6 +198,8 @@ static const char kNeedsCheckWindowButtonsKey;
 
 
 
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGScrollEventHandlingHUDSlider, NSObject);
 @implementation QTFixer_MGScrollEventHandlingHUDSlider
 //Prevent an audio glitch.
 - (void)beginGestureWithEvent:(id)arg1 {}
@@ -224,6 +208,8 @@ static const char kNeedsCheckWindowButtonsKey;
 
 
 
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGPlayerController, NSController);
 @implementation QTFixer_MGPlayerController
 //Prevent an audio glitch.
 - (void)increaseVolume:(id)arg1 {}
@@ -232,6 +218,8 @@ static const char kNeedsCheckWindowButtonsKey;
 
 
 
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_QTHUDButton, NSControl);
 @implementation QTFixer_QTHUDButton
 //Tabbing between QTHUDButtons can cause QuickTime to crash. This behavior is annoying anyway.
 - (BOOL)becomeFirstResponder {
@@ -241,30 +229,33 @@ static const char kNeedsCheckWindowButtonsKey;
 
 
 
-@implementation QTFixer_NSWindow
 
+EMPTY_SWIZZLE_INTERFACE(QTFixer_NSWindow, NSWindow);
+@implementation QTFixer_NSWindow
 //Continuation of above: Tabbing between QTHUDButtons can cause QuickTime to crash.
 - (void)selectKeyViewFollowingView:(id)arg1 {
 	if (strcmp(object_getClassName(arg1), "NSView") != 0 && strcmp(object_getClassName(arg1), "MGPlayPauseShuttleControllerView") != 0) {
 		ZKOrig(void, arg1);
 	}
 }
-
 @end
 
 
 
-@implementation QTFixer_MGDocumentWindowController
 
+@interface QTFixer_MGDocumentWindowController : NSWindowController
+- (void)toggleFloating:(id)arg1;
+@end
+@implementation QTFixer_MGDocumentWindowController
 - (id)customWindowsToEnterFullScreenForWindow:(id)arg1 {
 	if (ZKHookIvar(self, int, "_isFloating")) {
 		[self toggleFloating:nil];
 	}
-	
+		
 	return ZKOrig(id, arg1);
 }
-
 @end
+
 
 
 
@@ -287,5 +278,8 @@ static const char kNeedsCheckWindowButtonsKey;
 }
 
 @end
+
+
+
 
 int main() {}
