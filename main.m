@@ -140,7 +140,8 @@ static const char kNeedsCheckWindowButtonsKey;
 	ZKOrig(void, arg1);
 	
 	//Fix FullScreen animation glitch
-	[self _setHasAutoCanDrawSubviewsIntoLayer:true];
+	[self setLayerContentsRedrawPolicy:NSViewLayerContentsRedrawDuringViewResize];
+	[self setCanDrawSubviewsIntoLayer:true];
 }
 
 - (void)displayIfNeeded {
