@@ -23,7 +23,7 @@ install: $(OUTPUT)
 	@echo "Installing QuickTimeFixer.dylib to $(INSTALL_PATH)..."
 	@sudo cp -f $(OUTPUT) "$(INSTALL_PATH)/"
 	@echo "Installing source files to $(INSTALL_PATH)..."
-	@sudo cp -f main.m "$(INSTALL_PATH)/"
+	@sudo cp -f main.m "$(INSTALL_PATH)/QuickTimeFixer.m"
 	@echo "Installation complete."
 
 .PHONY: all clean install
