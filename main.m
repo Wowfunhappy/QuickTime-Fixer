@@ -8,6 +8,7 @@
 #import <Foundation/Foundation.h>
 #import <Cocoa/Cocoa.h>
 #import <AVFoundation/AVFoundation.h>
+#import <objc/runtime.h>
 #import "ZKSwizzle/ZKSwizzle.h"
 
 
@@ -23,11 +24,6 @@
 @end
 
 @interface QTFixer_MGCinematicFrameView : NSView
-{
-	unsigned int doNotUse1; //Without this, other iVars will be corrupted.
-	bool needsCheckWindowButtons; //As many as three bools appears to be safe.
-	bool needsSetHasAutoCanDrawSubviewsIntoLayer;
-}
 - (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
 @end
 
@@ -103,6 +99,7 @@
 
 
 
+static const char kNeedsCheckWindowButtonsKey;
 @implementation QTFixer_MGDocumentViewController
 
 - (void)loadView {
@@ -131,13 +128,22 @@
 /*In this class, we correct graphical issues using fixes discovered via trial and error.
  The timing of when these fixes are needed is very specific!*/
 
+- (BOOL)needsCheckWindowButtons {
+	return [objc_getAssociatedObject(self, &kNeedsCheckWindowButtonsKey) boolValue];
+}
+
+- (void)setNeedsCheckWindowButtons:(BOOL)value {
+	objc_setAssociatedObject(self, &kNeedsCheckWindowButtonsKey, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 - (void)setTitle:(id)arg1 {
-	needsSetHasAutoCanDrawSubviewsIntoLayer = true;
 	ZKOrig(void, arg1);
+	
+	//Fix FullScreen animation glitch
+	[self _setHasAutoCanDrawSubviewsIntoLayer:true];
 }
 
 - (void)displayIfNeeded {
-	
 	if ( [[self window] _canBecomeFullScreen] == NULL ) {
 		//Fix non-video documents displaying without a background.
 		
@@ -162,33 +168,28 @@
 		// brief moment of breakage, it never becomes visible to the user.
 	}
 	else {
-		if (needsSetHasAutoCanDrawSubviewsIntoLayer) {
-			//Fix FullScreen animation glitch
-			[self _setHasAutoCanDrawSubviewsIntoLayer:true];
-			needsSetHasAutoCanDrawSubviewsIntoLayer = false;
-		}
 		ZKOrig(void);
 	}
 }
 
 - (void)_windowChangedKeyState {
-	needsCheckWindowButtons = true;
+	[self setNeedsCheckWindowButtons:YES];
 	[self unstickWindowButtonHoverState];
 	
 	ZKOrig(void);
 }
 
 - (void)setFrameSize:(struct CGSize)arg1 {
-	needsCheckWindowButtons = true;
+	[self setNeedsCheckWindowButtons:YES];
 	[self performSelector:@selector(unstickWindowButtonHoverState) withObject:nil afterDelay:0.7];
 	ZKOrig(void, arg1);
 }
 
 - (void)unstickWindowButtonHoverState {
-	if (needsCheckWindowButtons) {
+	if ([self needsCheckWindowButtons]) {
 		//This won't always work; it depends on the location of the user's mouse at the time this code is run.
 		//(This bug exists in Mountain Lion too, btw.)
-		needsCheckWindowButtons = false;
+		[self setNeedsCheckWindowButtons:NO];
 		[[self subviews][1] viewDidEndLiveResize];
 	}
 }
