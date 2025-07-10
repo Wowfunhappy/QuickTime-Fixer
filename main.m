@@ -200,13 +200,14 @@
 @implementation QTFixer_MGCinematicWindow
 
 - (void)_windowTransformAnimationDidEnd:(id)arg1 {
-	if ([self _canBecomeFullScreen] != NULL) {
-		//Ensure window shadows appear. Different delay needed for different videos.
-		[self invalidateShadow];
-		[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:0.1];
-		[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:0.5];
-	}
 	ZKOrig(void, arg1);
+	for (int i = 0; i <= 100; i++) {
+		[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:(i * 0.01)];
+	}
+	// Just in case
+	[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:2];
+	[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:3];
+	[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:5];
 }
 
 @end
