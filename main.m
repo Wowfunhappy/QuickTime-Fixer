@@ -8,7 +8,7 @@
 #import <Foundation/Foundation.h>
 #import <Cocoa/Cocoa.h>
 #import <AVFoundation/AVFoundation.h>
-#import "ZKSwizzle.h"
+#import "ZKSwizzle/ZKSwizzle.h"
 
 
 
