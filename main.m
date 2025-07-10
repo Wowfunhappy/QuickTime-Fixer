@@ -103,13 +103,13 @@ static const char kNeedsCheckWindowButtonsKey;
 @implementation QTFixer_MGDocumentViewController
 
 - (void)loadView {
-	[self runUserScript: @"userFileOpenedScript"];
 	ZKOrig(void);
+	[self runUserScript: @"userFileOpenedScript"];
 }
 
 - (void)close {
-	[self runUserScript: @"userFileClosedScript"];
 	ZKOrig(void);
+	[self runUserScript: @"userFileClosedScript"];
 }
 
 - (void)runUserScript:(NSString*)scriptName {
