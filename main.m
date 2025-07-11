@@ -166,6 +166,7 @@ static const char kNeedsCheckWindowButtonsKey;
 		if ([self needsSetHasAutoCanDrawSubviewsIntoLayer]) {
 			//Fix FullScreen animation glitch
 			[self setCanDrawSubviewsIntoLayer:true];
+			[self setNeedsSetHasAutoCanDrawSubviewsIntoLayer:NO];
 		}
 		ZKOrig(void);
 	}
@@ -281,9 +282,28 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentController, NSDocumentController);
 @implementation QTFixer_MGDocumentController
 
 - (NSString *)typeForContentsOfURL:(NSURL *)url error:(NSError **)outError {
-	// If AVFoundation is enabled when QuickTime opens an AVI,
-	// it will use its broken AVI importer that almost never works.
-	if ([[[url pathExtension] lowercaseString] isEqualToString:@"avi"]) {
+
+	// Disabling AVFoundation appears to:
+	//	+ Allows QuickTime Framework based audio decoders to work.
+	//		• With AVFoundation enabled, QuickTime does seemingly try to use these decoders, but fails.
+	//		• Documents will open but not play. Console messages:
+	//			• `>audiocomp> AudioComponentPlugin.cpp:75: NewInstance: error -3000 returned from Open`
+	//			• `>aq> AudioQueueObject.cpp:1590: Prime: failed (-9405); will stop (66150/0 frames)`
+	//	+ Allows third-party QuickTime Framework based AVI importers to work.
+	//		• Presumably because with AVFoundation enabled, Apple's built-in AVI support takes priority.
+	//		• (Apple's built-in AVI support fails to open many/most files.)
+	//	- Disables features:
+	//		• All video editing functionality
+	//		• Sharing
+	//	- Breaks Apple's native AVFoundation decoders.
+	//	- Breaks modern Audio Component decoders.
+	
+	NSArray *extensionsThatForceQTKit = @[@"avi", @"flv", @"ogg", @"ogv"];
+	
+	BOOL shouldForceQTKit = [extensionsThatForceQTKit containsObject:[[url pathExtension] lowercaseString]];
+	if ([NSEvent modifierFlags] & NSAlternateKeyMask) shouldForceQTKit = !shouldForceQTKit; // alt inverts behavior
+	
+	if (shouldForceQTKit) {
 		[[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"MGEnableAVFoundation"];
 		[[NSUserDefaults standardUserDefaults] synchronize];
 	} else {
