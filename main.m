@@ -22,13 +22,7 @@ static void runUserScript(NSString* scriptName) {
 }
 
 @interface NSWindow (quickTimeFixer)
-- (void)_makeLayerBacked;
 - (id)_canBecomeFullScreen;
-- (BOOL)_processKeyboardUIKey:(id)arg1;
-@end
-
-@interface _borderView : NSView
-- (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
 @end
 
 
