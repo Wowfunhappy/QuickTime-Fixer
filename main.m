@@ -13,6 +13,14 @@
 
 #define EMPTY_SWIZZLE_INTERFACE(CLASS_NAME, SUPERCLASS) @interface CLASS_NAME : SUPERCLASS @end
 
+static void runUserScript(NSString* scriptName) {
+	NSString* path = [[NSBundle mainBundle] pathForResource:scriptName ofType:@"scpt"];
+	if (path != nil) {
+		NSDictionary *error;
+		[[[NSAppleScript alloc] initWithContentsOfURL:[NSURL fileURLWithPath:path] error:&error] executeAndReturnError:nil];
+	}
+}
+
 @interface NSWindow (quickTimeFixer)
 - (void)_makeLayerBacked;
 - (id)_canBecomeFullScreen;
@@ -73,25 +81,17 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_AVAssetExportSession, AVAssetExportSession);
 
 
 
-EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
-@implementation QTFixer_MGDocumentViewController
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGVideoPlaybackViewController, NSViewController);
+@implementation QTFixer_MGVideoPlaybackViewController
 
 - (void)loadView {
+	runUserScript(@"userFileOpenedScript");
 	ZKOrig(void);
-	[self runUserScript: @"userFileOpenedScript"];
 }
 
 - (void)close {
+	runUserScript(@"userFileClosedScript");
 	ZKOrig(void);
-	[self runUserScript: @"userFileClosedScript"];
-}
-
-- (void)runUserScript:(NSString*)scriptName {
-	NSString* path = [[NSBundle mainBundle] pathForResource:scriptName ofType:@"scpt"];
-	if (path != nil) {
-		NSDictionary *error;
-		[[[NSAppleScript alloc] initWithContentsOfURL:[NSURL fileURLWithPath:path] error:&error] executeAndReturnError:nil];
-	}
 }
 
 @end
@@ -99,6 +99,7 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 
 
 
+static const char kNeedsSetHasAutoCanDrawSubviewsIntoLayerKey;
 static const char kNeedsCheckWindowButtonsKey;
 @interface QTFixer_MGCinematicFrameView : NSView
 - (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
@@ -116,15 +117,24 @@ static const char kNeedsCheckWindowButtonsKey;
 	objc_setAssociatedObject(self, &kNeedsCheckWindowButtonsKey, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+- (BOOL)needsSetHasAutoCanDrawSubviewsIntoLayer {
+	return [objc_getAssociatedObject(self, &kNeedsSetHasAutoCanDrawSubviewsIntoLayerKey) boolValue];
+}
+
+- (void)setNeedsSetHasAutoCanDrawSubviewsIntoLayer:(BOOL)value {
+	objc_setAssociatedObject(self, &kNeedsSetHasAutoCanDrawSubviewsIntoLayerKey, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 - (void)setTitle:(id)arg1 {
-	ZKOrig(void, arg1);
-	
-	//Fix FullScreen animation glitch
 	[self setLayerContentsRedrawPolicy:NSViewLayerContentsRedrawDuringViewResize];
-	[self setCanDrawSubviewsIntoLayer:true];
+	
+	// Why can't we just setCanDrawSubviewsIntoLayer here? Because it will break screen recording documents.
+	[self setNeedsSetHasAutoCanDrawSubviewsIntoLayer:YES];
+	ZKOrig(void, arg1);
 }
 
 - (void)displayIfNeeded {
+	
 	if ( [[self window] _canBecomeFullScreen] == NULL ) {
 		//Fix non-video documents displaying without a background.
 		
@@ -149,6 +159,10 @@ static const char kNeedsCheckWindowButtonsKey;
 		// brief moment of breakage, it never becomes visible to the user.
 	}
 	else {
+		if ([self needsSetHasAutoCanDrawSubviewsIntoLayer]) {
+			//Fix FullScreen animation glitch
+			[self setCanDrawSubviewsIntoLayer:true];
+		}
 		ZKOrig(void);
 	}
 }
@@ -259,12 +273,47 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_NSWindow, NSWindow);
 
 
 
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentController, NSDocumentController);
+@implementation QTFixer_MGDocumentController
+
+- (NSString *)typeForContentsOfURL:(NSURL *)url error:(NSError **)outError {
+	// If AVFoundation is enabled when QuickTime opens an AVI,
+	// it will use its broken AVI importer that almost never works.
+	if ([[[url pathExtension] lowercaseString] isEqualToString:@"avi"]) {
+		[[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"MGEnableAVFoundation"];
+		[[NSUserDefaults standardUserDefaults] synchronize];
+	} else {
+		[[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"MGEnableAVFoundation"];
+		[[NSUserDefaults standardUserDefaults] synchronize];
+	}
+	
+	return ZKOrig(NSString *, url, outError);
+}
+
+@end
+
+
+
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
+@implementation QTFixer_MGAssetLoader
+
+- (void)loadingDidFailWithError:(id)arg1 {
+	NSLog(@"QuickTime failed to load document due to error: %@", arg1);
+	ZKOrig(void, arg1);
+}
+
+@end
+
+
+
+
 @implementation NSObject (main)
 
 + (void)load {
 	ZKSwizzle(QTFixer_AVPlayerItem, AVPlayerItem);
 	ZKSwizzle(QTFixer_AVAssetExportSession, AVAssetExportSession);
-	ZKSwizzle(QTFixer_MGDocumentViewController, MGDocumentViewController);
+	ZKSwizzle(QTFixer_MGVideoPlaybackViewController, MGVideoPlaybackViewController);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
 	ZKSwizzle(QTFixer_MGCinematicWindow, MGCinematicWindow);
 	ZKSwizzle(QTFixer_MGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
@@ -272,6 +321,9 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_NSWindow, NSWindow);
 	ZKSwizzle(QTFixer_QTHUDButton, QTHUDButton);
 	ZKSwizzle(QTFixer_NSWindow, NSWindow);
 	ZKSwizzle(QTFixer_MGDocumentWindowController, MGDocumentWindowController);
+	ZKSwizzle(QTFixer_MGDocumentController, MGDocumentController);
+	ZKSwizzle(QTFixer_MGAssetLoader, MGAssetLoader);
+	
 	
 	//Fix menu bar not switching to QuickTime.
 	[[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
