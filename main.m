@@ -81,16 +81,26 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_AVAssetExportSession, AVAssetExportSession);
 
 
 
-EMPTY_SWIZZLE_INTERFACE(QTFixer_MGVideoPlaybackViewController, NSViewController);
-@implementation QTFixer_MGVideoPlaybackViewController
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
+@implementation QTFixer_MGDocumentViewController
 
 - (void)loadView {
-	runUserScript(@"userFileOpenedScript");
+	if (
+		[self isKindOfClass:NSClassFromString(@"MGAudioPlaybackViewController")] || 
+		[self isKindOfClass:NSClassFromString(@"MGVideoPlaybackViewController")]
+	) {
+		runUserScript(@"userFileOpenedScript");
+	}
 	ZKOrig(void);
 }
 
 - (void)close {
-	runUserScript(@"userFileClosedScript");
+	if (
+		[self isKindOfClass:NSClassFromString(@"MGAudioPlaybackViewController")] || 
+		[self isKindOfClass:NSClassFromString(@"MGVideoPlaybackViewController")]
+	) {
+		runUserScript(@"userFileClosedScript");
+	}
 	ZKOrig(void);
 }
 
@@ -313,7 +323,7 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 + (void)load {
 	ZKSwizzle(QTFixer_AVPlayerItem, AVPlayerItem);
 	ZKSwizzle(QTFixer_AVAssetExportSession, AVAssetExportSession);
-	ZKSwizzle(QTFixer_MGVideoPlaybackViewController, MGVideoPlaybackViewController);
+	ZKSwizzle(QTFixer_MGDocumentViewController, MGDocumentViewController);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
 	ZKSwizzle(QTFixer_MGCinematicWindow, MGCinematicWindow);
 	ZKSwizzle(QTFixer_MGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
