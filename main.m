@@ -327,6 +327,7 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 @implementation QTFixer_MGAssetLoader
 
 - (void)loadingDidFailWithError:(id)arg1 {
+	// While not strictly necessary, this is very useful information to have in the console.
 	NSLog(@"QuickTime failed to load document due to error: %@", arg1);
 	ZKOrig(void, arg1);
 }
