@@ -13,14 +13,6 @@
 
 #define EMPTY_SWIZZLE_INTERFACE(CLASS_NAME, SUPERCLASS) @interface CLASS_NAME : SUPERCLASS @end
 
-static void runUserScript(NSString* scriptName) {
-	NSString* path = [[NSBundle mainBundle] pathForResource:scriptName ofType:@"scpt"];
-	if (path != nil) {
-		NSDictionary *error;
-		[[[NSAppleScript alloc] initWithContentsOfURL:[NSURL fileURLWithPath:path] error:&error] executeAndReturnError:nil];
-	}
-}
-
 @interface NSWindow (quickTimeFixer)
 - (id)_canBecomeFullScreen;
 @end
@@ -79,13 +71,13 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 @implementation QTFixer_MGDocumentViewController
 
 - (void)loadView {
+	ZKOrig(void);
 	if (
 		[self isKindOfClass:NSClassFromString(@"MGAudioPlaybackViewController")] || 
 		[self isKindOfClass:NSClassFromString(@"MGVideoPlaybackViewController")]
 	) {
-		runUserScript(@"userFileOpenedScript");
+		[self runUserScript:@"userFileOpenedScript"];
 	}
-	ZKOrig(void);
 }
 
 - (void)close {
@@ -93,9 +85,21 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 		[self isKindOfClass:NSClassFromString(@"MGAudioPlaybackViewController")] || 
 		[self isKindOfClass:NSClassFromString(@"MGVideoPlaybackViewController")]
 	) {
-		runUserScript(@"userFileClosedScript");
+		[self runUserScript:@"userFileClosedScript"];
 	}
 	ZKOrig(void);
+}
+
+- (void)runUserScript:(NSString*)scriptName {	
+	NSString* path = [[NSBundle mainBundle] pathForResource:scriptName ofType:@"scpt"];
+	if (path != nil) {
+		NSString *scriptSource = [
+			NSString stringWithFormat:@"run script (load script POSIX file \"%@\") with parameters {\"%@\"}",
+			path,
+			[[self valueForKey:@"document"]displayName]
+		];
+		[[[NSAppleScript alloc] initWithSource:scriptSource] executeAndReturnError:nil];
+	}
 }
 
 @end
