@@ -266,15 +266,52 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_NSWindow, NSWindow);
 
 
 
+static const char kIsSettingMainViewControllerKey;
+
 @interface QTFixer_MGDocumentWindowController : NSWindowController
 - (void)toggleFloating:(id)arg1;
+@property (nonatomic, strong) id currentMainViewController;
 @end
 @implementation QTFixer_MGDocumentWindowController
+
+- (BOOL)isSettingMainViewController {
+	return [objc_getAssociatedObject(self, &kIsSettingMainViewControllerKey) boolValue];
+}
+
+- (void)setIsSettingMainViewController:(BOOL)value {
+	objc_setAssociatedObject(self, &kIsSettingMainViewControllerKey, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+- (void)setCurrentMainViewController:(id)controller {
+	if ([self isSettingMainViewController]) {
+		ZKOrig(void, controller);
+		return;
+	}
+
+	[self setIsSettingMainViewController:YES];
+
+	id oldValue = [self valueForKey:@"currentMainViewController"];
+
+	if (oldValue != controller) {
+		[self willChangeValueForKey:@"currentMainViewController"];
+		ZKOrig(void, controller);
+		[self didChangeValueForKey:@"currentMainViewController"];
+	} else {
+		ZKOrig(void, controller);
+	}
+
+	[self setIsSettingMainViewController:NO];
+}
+
++ (BOOL)automaticallyNotifiesObserversOfCurrentMainViewController {
+	return NO;
+}
+
 - (id)customWindowsToEnterFullScreenForWindow:(id)arg1 {
 	if (ZKHookIvar(self, int, "_isFloating")) {
 		[self toggleFloating:nil];
 	}
-		
+
 	return ZKOrig(id, arg1);
 }
 @end

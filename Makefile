@@ -24,6 +24,7 @@ install: $(OUTPUT)
 	@sudo cp -f $(OUTPUT) "$(INSTALL_PATH)/"
 	@echo "Installing source files to $(INSTALL_PATH)..."
 	@sudo cp -f main.m "$(INSTALL_PATH)/QuickTimeFixer.m"
+	@sudo codesign --deep -f -s - /Applications/QuickTime\ Player.app/
 	@echo "Installation complete."
 
 .PHONY: all clean install
