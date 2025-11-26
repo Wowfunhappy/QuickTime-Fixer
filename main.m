@@ -142,38 +142,34 @@ static const char kNeedsCheckWindowButtonsKey;
 }
 
 - (void)displayIfNeeded {
+	//Fix non-video documents displaying without a background.
 	
-	if ( [[self window] _canBecomeFullScreen] == NULL ) {
-		//Fix non-video documents displaying without a background.
-		
-		//This is very misleading. ZKHookIvar will return a set of nine (!) bits from MGCinematicFrameView.
-		//The fifth of these bits represents _entireBackBufferIsDirty.
-		unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
-		
-		//Set the _entireBackBufferIsDirty bit to 1
-		*Ivars |= 1UL << 4;
-		
-		// Disabling screen updates here prevents a brief flash of glitchiness.
-		NSDisableScreenUpdates();
-		[super displayIfNeeded];
-		ZKOrig(void);
-		NSEnableScreenUpdates();
-		
-		// I think I might finally semi-understand why this works. Decompilers show that [self displayIfNeeded]
-		// calls [super displayIfNeeded] at the end. I think [super displayIfNeeded] re-breaks whatever
-		// [self displayIfNeeded] fixes. However, [super displayIfNeeded] won't do anything if it's not "needed"!
-		// By calling the super implementation first, we prevent it from being necessary later, and so the breakage
-		// happen before the fix instead of the other way around. If we also disable screen updates during the
-		// brief moment of breakage, it never becomes visible to the user.
+	//This is very misleading. ZKHookIvar will return a set of nine (!) bits from MGCinematicFrameView.
+	//The fifth of these bits represents _entireBackBufferIsDirty.
+	unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
+	
+	//Set the _entireBackBufferIsDirty bit to 1
+	*Ivars |= 1UL << 4;
+	
+	// Disabling screen updates here prevents a brief flash of glitchiness.
+	NSDisableScreenUpdates();
+	[super displayIfNeeded];
+	ZKOrig(void);
+	NSEnableScreenUpdates();
+	
+	// I think I might finally semi-understand why this works. Decompilers show that [self displayIfNeeded]
+	// calls [super displayIfNeeded] at the end. I think [super displayIfNeeded] re-breaks whatever
+	// [self displayIfNeeded] fixes. However, [super displayIfNeeded] won't do anything if it's not "needed"!
+	// By calling the super implementation first, we prevent it from being necessary later, and so the breakage
+	// happen before the fix instead of the other way around. If we also disable screen updates during the
+	// brief moment of breakage, it never becomes visible to the user.
+
+	if ([self needsSetHasAutoCanDrawSubviewsIntoLayer] && [[self window] _canBecomeFullScreen] != NULL) {
+		//Fix FullScreen animation glitch
+		[self setCanDrawSubviewsIntoLayer:true];
+		[self setNeedsSetHasAutoCanDrawSubviewsIntoLayer:NO];
 	}
-	else {
-		if ([self needsSetHasAutoCanDrawSubviewsIntoLayer]) {
-			//Fix FullScreen animation glitch
-			[self setCanDrawSubviewsIntoLayer:true];
-			[self setNeedsSetHasAutoCanDrawSubviewsIntoLayer:NO];
-		}
-		ZKOrig(void);
-	}
+	ZKOrig(void);
 }
 
 - (void)_windowChangedKeyState {
