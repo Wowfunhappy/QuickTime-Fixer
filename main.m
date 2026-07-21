@@ -13,13 +13,6 @@
 
 #define EMPTY_SWIZZLE_INTERFACE(CLASS_NAME, SUPERCLASS) @interface CLASS_NAME : SUPERCLASS @end
 
-@interface NSWindow (quickTimeFixer)
-- (id)_canBecomeFullScreen;
-@end
-
-
-
-
 @interface QTFixer_AVPlayerItem : AVPlayerItem
 - (id)_trackWithTrackID:(int)arg1;
 @end
@@ -107,10 +100,8 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 
 
 
-static const char kNeedsSetHasAutoCanDrawSubviewsIntoLayerKey;
 static const char kNeedsCheckWindowButtonsKey;
 @interface QTFixer_MGCinematicFrameView : NSView
-- (void) _setHasAutoCanDrawSubviewsIntoLayer:(bool)arg1;
 @end
 
 @implementation QTFixer_MGCinematicFrameView
@@ -125,19 +116,8 @@ static const char kNeedsCheckWindowButtonsKey;
 	objc_setAssociatedObject(self, &kNeedsCheckWindowButtonsKey, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-- (BOOL)needsSetHasAutoCanDrawSubviewsIntoLayer {
-	return [objc_getAssociatedObject(self, &kNeedsSetHasAutoCanDrawSubviewsIntoLayerKey) boolValue];
-}
-
-- (void)setNeedsSetHasAutoCanDrawSubviewsIntoLayer:(BOOL)value {
-	objc_setAssociatedObject(self, &kNeedsSetHasAutoCanDrawSubviewsIntoLayerKey, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
 - (void)setTitle:(id)arg1 {
 	[self setLayerContentsRedrawPolicy:NSViewLayerContentsRedrawDuringViewResize];
-	
-	// Why can't we just setCanDrawSubviewsIntoLayer here? Because it will break screen recording documents.
-	[self setNeedsSetHasAutoCanDrawSubviewsIntoLayer:YES];
 	ZKOrig(void, arg1);
 }
 
@@ -156,20 +136,13 @@ static const char kNeedsCheckWindowButtonsKey;
 	[super displayIfNeeded];
 	ZKOrig(void);
 	NSEnableScreenUpdates();
-	
+
 	// I think I might finally semi-understand why this works. Decompilers show that [self displayIfNeeded]
 	// calls [super displayIfNeeded] at the end. I think [super displayIfNeeded] re-breaks whatever
 	// [self displayIfNeeded] fixes. However, [super displayIfNeeded] won't do anything if it's not "needed"!
 	// By calling the super implementation first, we prevent it from being necessary later, and so the breakage
 	// happen before the fix instead of the other way around. If we also disable screen updates during the
 	// brief moment of breakage, it never becomes visible to the user.
-
-	if ([self needsSetHasAutoCanDrawSubviewsIntoLayer] && [[self window] _canBecomeFullScreen] != NULL) {
-		//Fix FullScreen animation glitch
-		[self setCanDrawSubviewsIntoLayer:true];
-		[self setNeedsSetHasAutoCanDrawSubviewsIntoLayer:NO];
-	}
-	ZKOrig(void);
 }
 
 - (void)_windowChangedKeyState {
@@ -204,13 +177,11 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGCinematicWindow, NSWindow);
 
 - (void)_windowTransformAnimationDidEnd:(id)arg1 {
 	ZKOrig(void, arg1);
-	for (int i = 0; i <= 100; i++) {
-		[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:(i * 0.01)];
+	
+	static const double delays[] = {0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 2.0, 3.0, 5.0};
+	for (int i = 0; i < (int)(sizeof(delays) / sizeof(delays[0])); i++) {
+		[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:delays[i]];
 	}
-	// Just in case
-	[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:2];
-	[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:3];
-	[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:5];
 }
 
 @end
@@ -308,6 +279,12 @@ static const char kIsSettingMainViewControllerKey;
 		[self toggleFloating:nil];
 	}
 
+	// Fix FullScreen animation glitch.
+	// Flattening the frame view's subviews into a single layer makes the window animate as one surface.
+	// AppKit lays the window out as part of entering fullscreen after this returns,
+	// so the flatten is realized before the zoom captures it.
+	[[[arg1 contentView] superview] setCanDrawSubviewsIntoLayer:YES];
+
 	return ZKOrig(id, arg1);
 }
 @end
@@ -321,19 +298,19 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentController, NSDocumentController);
 - (NSString *)typeForContentsOfURL:(NSURL *)url error:(NSError **)outError {
 
 	// Disabling AVFoundation appears to:
-	//	+ Allows QuickTime Framework based audio decoders to work.
+	//	+ Allow QuickTime Framework based audio decoders to work.
 	//		• With AVFoundation enabled, QuickTime does seemingly try to use these decoders, but fails.
 	//		• Documents will open but not play. Console messages:
 	//			• `>audiocomp> AudioComponentPlugin.cpp:75: NewInstance: error -3000 returned from Open`
 	//			• `>aq> AudioQueueObject.cpp:1590: Prime: failed (-9405); will stop (66150/0 frames)`
-	//	+ Allows third-party QuickTime Framework based AVI importers to work.
+	//	+ Allow third-party QuickTime Framework based AVI importers to work.
 	//		• Presumably because with AVFoundation enabled, Apple's built-in AVI support takes priority.
 	//		• (Apple's built-in AVI support fails to open many/most files.)
-	//	- Disables features:
+	//	- Disable features:
 	//		• All video editing functionality
 	//		• Sharing
-	//	- Breaks Apple's native AVFoundation decoders.
-	//	- Breaks modern Audio Component decoders.
+	//	- Break Apple's native AVFoundation decoders.
+	//	- Break modern Audio Component decoders.
 	
 	NSArray *extensionsThatForceQTKit = @[@"avi", @"flv", @"ogg", @"ogv"];
 	
@@ -385,10 +362,6 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 	ZKSwizzle(QTFixer_MGDocumentWindowController, MGDocumentWindowController);
 	ZKSwizzle(QTFixer_MGDocumentController, MGDocumentController);
 	ZKSwizzle(QTFixer_MGAssetLoader, MGAssetLoader);
-	
-	
-	//Fix menu bar not switching to QuickTime.
-	[[[NSAppleScript alloc] initWithSource:@"tell application (path to frontmost application as text) to activate"] executeAndReturnError:nil];
 }
 
 @end
