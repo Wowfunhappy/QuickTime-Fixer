@@ -282,13 +282,22 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGNibViewMenuItem, NSMenuItem);
 
 // Chapter menu items normally install a custom view (from MGChapterMenuItemView.nib) when they
 // receive NSMenuDidBeginTrackingNotification. That view's title label is hardcoded white, which is
-// unreadable against Mavericks' white menus. On Mountain Lion the notification-based loading worked,
-// but on Mavericks the notification fires before menuNeedsUpdate: has created the items, so the
-// first time the chapter menu opens the items miss it and draw as ordinary (readable) text items;
-// on every later open the now-cached items catch the notification and turn white-on-white.
-// Suppress the view loading entirely so every open matches the readable first one. Video chapter
-// thumbnails still appear: they're delivered via setImage: on the item, not through this view.
-- (void)menuDidBeginTracking:(id)arg1 {}
+// correct for the video chapter menu (QuickTime gives it a dark, Dock-style appearance) but
+// unreadable against the audio chapter menu, which is a standard white menu. On Mavericks the
+// notification fires before menuNeedsUpdate: has created the items, so the first time the audio
+// chapter menu opens the items miss it and draw as ordinary (readable) text items; on every later
+// open the now-cached items catch the notification and turn white-on-white. Suppress the view
+// loading for the audio menu only, so every open matches the readable first one.
+- (void)menuDidBeginTracking:(id)arg1 {
+	id chapterMenuController = [[(NSMenuItem *)self menu] delegate];
+	if ([chapterMenuController respondsToSelector:@selector(delegate)]) {
+		id playbackViewController = [(id)chapterMenuController delegate];
+		if ([playbackViewController isKindOfClass:NSClassFromString(@"MGAudioPlaybackViewController")]) {
+			return;
+		}
+	}
+	ZKOrig(void, arg1);
+}
 
 @end
 
