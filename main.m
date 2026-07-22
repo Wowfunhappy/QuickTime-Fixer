@@ -8,6 +8,7 @@
 #import <Foundation/Foundation.h>
 #import <Cocoa/Cocoa.h>
 #import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import "ZKSwizzle/ZKSwizzle.h"
 
@@ -100,6 +101,9 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 
 
 
+// Mirrors _isAnimatingFullScreen; set and cleared alongside it in -setFullScreen:duration: below.
+static BOOL gQTFixAnimatingFullScreen = NO;
+
 static const char kNeedsCheckWindowButtonsKey;
 @interface QTFixer_MGCinematicFrameView : NSView
 @end
@@ -116,14 +120,15 @@ static const char kNeedsCheckWindowButtonsKey;
 	objc_setAssociatedObject(self, &kNeedsCheckWindowButtonsKey, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-- (void)setTitle:(id)arg1 {
-	[self setLayerContentsRedrawPolicy:NSViewLayerContentsRedrawDuringViewResize];
-	ZKOrig(void, arg1);
-}
-
 - (void)displayIfNeeded {
 	//Fix non-video documents displaying without a background.
 	
+	// Don't do any of this while the fullscreen transition is animating.
+	if (gQTFixAnimatingFullScreen) {
+		ZKOrig(void);
+		return;
+	}
+
 	//This is very misleading. ZKHookIvar will return a set of nine (!) bits from MGCinematicFrameView.
 	//The fifth of these bits represents _entireBackBufferIsDirty.
 	unsigned int *Ivars = &ZKHookIvar(self, unsigned int, "_entireBackBufferIsDirty");
@@ -154,7 +159,11 @@ static const char kNeedsCheckWindowButtonsKey;
 
 - (void)setFrameSize:(struct CGSize)arg1 {
 	[self setNeedsCheckWindowButtons:YES];
-	[self performSelector:@selector(unstickWindowButtonHoverState) withObject:nil afterDelay:0.7];
+	// During the fullscreen transition this runs every frame, and each call would schedule its own
+	// timer. The transition schedules a single one from its completion handler instead.
+	if (!gQTFixAnimatingFullScreen) {
+		[self performSelector:@selector(unstickWindowButtonHoverState) withObject:nil afterDelay:0.7];
+	}
 	ZKOrig(void, arg1);
 }
 
@@ -164,23 +173,6 @@ static const char kNeedsCheckWindowButtonsKey;
 		//(This bug exists in Mountain Lion too, btw.)
 		[self setNeedsCheckWindowButtons:NO];
 		[[self subviews][1] viewDidEndLiveResize];
-	}
-}
-
-@end
-
-
-
-
-EMPTY_SWIZZLE_INTERFACE(QTFixer_MGCinematicWindow, NSWindow);
-@implementation QTFixer_MGCinematicWindow
-
-- (void)_windowTransformAnimationDidEnd:(id)arg1 {
-	ZKOrig(void, arg1);
-	
-	static const double delays[] = {0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 2.0, 3.0, 5.0};
-	for (int i = 0; i < (int)(sizeof(delays) / sizeof(delays[0])); i++) {
-		[self performSelector:@selector(invalidateShadow) withObject:nil afterDelay:delays[i]];
 	}
 }
 
@@ -235,10 +227,78 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_NSWindow, NSWindow);
 
 static const char kIsSettingMainViewControllerKey;
 
+// Declarations only, so we can call these without casting everything to id.
+// The first four are MGCinematicWindow properties; the last two are private NSWindow methods that
+// exist in Mavericks' AppKit.
+@interface NSWindow (quickTimeFixerFullScreen)
+- (void)setHasRoundedCorners:(BOOL)arg1;
+- (void)setAutomaticallyConstrainsFrameRect:(BOOL)arg1;
+- (void)setMovingDisabled:(BOOL)arg1;
+- (void)setResizingDisabled:(BOOL)arg1;
+- (void)_startLiveResize;
+- (void)_endLiveResize;
+@end
+
 @interface QTFixer_MGDocumentWindowController : NSWindowController
 - (void)toggleFloating:(id)arg1;
+- (BOOL)isFloating;
+- (void)updateTitlebarVisibility;
+- (struct CGSize)adjustedNaturalContentSize;
+- (BOOL)isContentResizable;
+- (void)resizeWindowToFitContent;
 @property (nonatomic, strong) id currentMainViewController;
 @end
+
+// Bits within the bitfield storage unit that ZKHookIvar hands back for any one of these ivars.
+// Order is from MGDocumentWindowController's ivar list and is identical in 10.2 and 10.3.
+#define QTFIX_ISFULLSCREEN				(1U << 0)
+#define QTFIX_ISANIMATINGFULLSCREEN			(1U << 1)
+#define QTFIX_NEEDSRESIZEAFTERFULLSCREENEXIT		(1U << 3)
+
+// The two file static helpers 10.3's -setFullScreen:duration: calls. They have no selectors in the
+// binary, so the names are ours. The first genuinely ignores its controller argument in 10.3, so we
+// simply don't take one.
+static void QTFixConfigureWindowForFullScreen(NSWindow *window) {
+	[window setMovingDisabled:YES];
+	[window setResizingDisabled:YES];
+	[[window standardWindowButton:NSWindowMiniaturizeButton] setEnabled:NO];
+	[window setAutomaticallyConstrainsFrameRect:NO];
+	[window setResizeIncrements:NSMakeSize(1.0, 1.0)];
+}
+
+static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController *controller, NSWindow *window) {
+	NSSize naturalSize = [controller adjustedNaturalContentSize];
+	if (!NSEqualSizes(naturalSize, NSZeroSize)) {
+		[window setContentAspectRatio:naturalSize];
+	}
+
+	[window setAutomaticallyConstrainsFrameRect:YES];
+	[[window standardWindowButton:NSWindowMiniaturizeButton] setEnabled:YES];
+	[window setResizingDisabled:![controller isContentResizable]];
+	[window setMovingDisabled:NO];
+
+	if ([window screen] == nil) {
+		NSScreen *firstScreen = [[NSScreen screens] objectAtIndex:0];
+		[window
+			setFrame:[window constrainFrameRect:[window frame] toScreen:firstScreen]
+			display:YES
+			animate:YES
+		];
+	}
+
+	unsigned int *flags = &ZKHookIvar(controller, unsigned int, "_isFullScreen");
+	if (*flags & QTFIX_NEEDSRESIZEAFTERFULLSCREENEXIT) {
+		*flags &= ~QTFIX_NEEDSRESIZEAFTERFULLSCREENEXIT;
+		[
+			[NSRunLoop currentRunLoop] performSelector:@selector(resizeWindowToFitContent)
+			target:controller
+			argument:nil
+			order:0
+			modes:[NSArray arrayWithObject:NSRunLoopCommonModes]
+		];
+	}
+}
+
 @implementation QTFixer_MGDocumentWindowController
 
 - (BOOL)isSettingMainViewController {
@@ -275,18 +335,117 @@ static const char kIsSettingMainViewControllerKey;
 }
 
 - (id)customWindowsToEnterFullScreenForWindow:(id)arg1 {
-	if (ZKHookIvar(self, int, "_isFloating")) {
+	if ([self isFloating]) {
 		[self toggleFloating:nil];
 	}
 
-	// Fix FullScreen animation glitch.
-	// Flattening the frame view's subviews into a single layer makes the window animate as one surface.
-	// AppKit lays the window out as part of entering fullscreen after this returns,
-	// so the flatten is realized before the zoom captures it.
-	[[[arg1 contentView] superview] setCanDrawSubviewsIntoLayer:YES];
-
 	return ZKOrig(id, arg1);
 }
+
+// QuickTime 10.2's Fullscreen animation is glitchy on OS X 10.9. Replace it with one derived from QuickTime 10.3.
+- (void)setFullScreen:(BOOL)arg1 duration:(double)arg2 {
+	[self willChangeValueForKey:@"fullScreen"];
+
+	unsigned int *flags = &ZKHookIvar(self, unsigned int, "_isFullScreen");
+	if (arg1) {
+		*flags |= QTFIX_ISFULLSCREEN;
+	} else {
+		*flags &= ~QTFIX_ISFULLSCREEN;
+	}
+
+	NSWindow *window = [self window];
+	id viewController = [self currentMainViewController];
+	NSView *mainView = [viewController view];
+	NSView *superview = [mainView superview];
+
+	NSRect *savedFrame = &ZKHookIvar(self, NSRect, "_savedNonFullScreenWindowFrame");
+	NSRect destinationFrame = arg1 ? [[window screen] frame] : *savedFrame;
+	
+	//arg2 *= 1.0; // Change animation duration if desired
+	BOOL shouldAnimate = (arg2 > 0.0 && mainView != nil &&
+		![[NSUserDefaults standardUserDefaults] boolForKey:@"MGFullScreenNeverAnimate"]);
+
+	if (shouldAnimate) {
+		if (arg1) {
+			*savedFrame = [window frame];
+			QTFixConfigureWindowForFullScreen(window);
+		} else {
+			[window setHasRoundedCorners:YES];
+			[window setHasShadow:YES];
+		}
+
+		gQTFixAnimatingFullScreen = YES;
+		[window _startLiveResize];
+
+		[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+			[context setDuration:arg2];
+			[context setTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionDefault]];
+
+			ZKHookIvar(self, unsigned int, "_isFullScreen") |= QTFIX_ISANIMATINGFULLSCREEN;
+			gQTFixAnimatingFullScreen = YES;
+
+			[(NSWindow *)[window animator] setFrame:destinationFrame display:YES];
+			[self updateTitlebarVisibility];
+
+			NSRect destInWindow = [window convertRectFromScreen:destinationFrame];
+			NSRect destInSuperview = [superview convertRect:destInWindow fromView:nil];
+			NSSize destInMainView = [superview convertSize:destInSuperview.size toView:mainView];
+
+			[[NSNotificationCenter defaultCenter]
+				postNotificationName:@"MGDocumentWindowControllerDidStartFullScreenAnimationNotification"
+				object:self
+				userInfo:[NSDictionary dictionaryWithObject:[NSValue valueWithSize:destInMainView]
+				forKey:@"MGDocumentWindowControllerFullScreenAnimationDestinationMainViewBoundsSizeKey"]
+			];
+		} completionHandler:^{
+			[[NSNotificationCenter defaultCenter]
+				postNotificationName:@"MGDocumentWindowControllerDidFinishFullScreenAnimationNotification"
+							  object:self];
+
+			ZKHookIvar(self, unsigned int, "_isFullScreen") &= ~QTFIX_ISANIMATINGFULLSCREEN;
+			gQTFixAnimatingFullScreen = NO;
+			[[[window contentView] superview] performSelector:@selector(unstickWindowButtonHoverState)
+												   withObject:nil
+												   afterDelay:0.7];
+
+			[window _endLiveResize];
+
+			if (arg1) {
+				[window setHasShadow:NO];
+				[window setHasRoundedCorners:NO];
+			} else {
+				QTFixRestoreWindowFromFullScreen(self, window);
+				ZKHookIvar(self, NSRect, "_savedNonFullScreenWindowFrame") = NSZeroRect;
+			}
+		}];
+	} else {
+		if (arg1) {
+			*savedFrame = [window frame];
+			QTFixConfigureWindowForFullScreen(window);
+		} else {
+			[window setHasRoundedCorners:YES];
+			[window setHasShadow:YES];
+		}
+
+		[window setFrame:destinationFrame display:YES];
+
+		[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+			[context setDuration:0.0];
+			[self updateTitlebarVisibility];
+		} completionHandler:nil];
+
+		if (arg1) {
+			[window setHasShadow:NO];
+			[window setHasRoundedCorners:NO];
+		} else {
+			QTFixRestoreWindowFromFullScreen(self, window);
+			*savedFrame = NSZeroRect;
+		}
+	}
+
+	[self didChangeValueForKey:@"fullScreen"];
+}
+
 @end
 
 
@@ -300,15 +459,15 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentController, NSDocumentController);
 	// Disabling AVFoundation appears to:
 	//	+ Allow QuickTime Framework based audio decoders to work.
 	//		• With AVFoundation enabled, QuickTime does seemingly try to use these decoders, but fails.
-	//		• Documents will open but not play. Console messages:
+	//		• Documents will open but not play. Console messages:
 	//			• `>audiocomp> AudioComponentPlugin.cpp:75: NewInstance: error -3000 returned from Open`
-	//			• `>aq> AudioQueueObject.cpp:1590: Prime: failed (-9405); will stop (66150/0 frames)`
+	//			• `>aq> AudioQueueObject.cpp:1590: Prime: failed (-9405); will stop (66150/0 frames)`
 	//	+ Allow third-party QuickTime Framework based AVI importers to work.
-	//		• Presumably because with AVFoundation enabled, Apple's built-in AVI support takes priority.
-	//		• (Apple's built-in AVI support fails to open many/most files.)
+	//		• Presumably because with AVFoundation enabled, Apple's built-in AVI support takes priority.
+	//		• (Apple's built-in AVI support fails to open many/most files.)
 	//	- Disable features:
-	//		• All video editing functionality
-	//		• Sharing
+	//		• All video editing functionality
+	//		• Sharing
 	//	- Break Apple's native AVFoundation decoders.
 	//	- Break modern Audio Component decoders.
 	
@@ -354,7 +513,6 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 	ZKSwizzle(QTFixer_AVAssetExportSession, AVAssetExportSession);
 	ZKSwizzle(QTFixer_MGDocumentViewController, MGDocumentViewController);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
-	ZKSwizzle(QTFixer_MGCinematicWindow, MGCinematicWindow);
 	ZKSwizzle(QTFixer_MGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
 	ZKSwizzle(QTFixer_MGPlayerController, MGPlayerController);
 	ZKSwizzle(QTFixer_QTHUDButton, QTHUDButton);
