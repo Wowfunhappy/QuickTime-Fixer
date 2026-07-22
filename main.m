@@ -104,6 +104,12 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 // Mirrors _isAnimatingFullScreen; set and cleared alongside it in -setFullScreen:duration: below.
 static BOOL gQTFixAnimatingFullScreen = NO;
 
+// Typed access to the MGAutovisibilityController methods we call.
+@protocol QTFixAutovisibility <NSObject>
+- (void)hide;
+- (void)cancelAutomaticallyShowDueToKeyDown;
+@end
+
 static const char kNeedsCheckWindowButtonsKey;
 @interface QTFixer_MGCinematicFrameView : NSView
 @end
@@ -181,6 +187,76 @@ static const char kNeedsCheckWindowButtonsKey;
 
 
 
+static const char kQTFixDeferredKeydownShowKey;
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAutovisibilityController, NSObject);
+@implementation QTFixer_MGAutovisibilityController
+
+// The key-down monitor schedules this as a common-modes run loop perform, and a menu key
+// equivalent's highlight flash spins the run loop (in a tracking mode) BEFORE the menu action
+// runs — so the keystroke that toggles fullscreen would show the HUD first and start the
+// transition second. Re-defer the show into NSDefaultRunLoopMode only: that can't fire during
+// the tracking spin, so it runs after the key equivalent's dispatch has fully completed. If the
+// keystroke did start a transition, setFullScreen:duration:'s cancelAutomaticallyShowDueToKeyDown
+// has cleared _willShowDueToKeyDown by then and the original implementation does nothing. For any
+// other keystroke the show still happens, one run loop turn later. Works with any fullscreen
+// keyboard shortcut, including custom ones set in System Preferences.
+- (void)showDueToKeyDownIfNeeded {
+	if (objc_getAssociatedObject(self, &kQTFixDeferredKeydownShowKey)) {
+		objc_setAssociatedObject(self, &kQTFixDeferredKeydownShowKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		if (gQTFixAnimatingFullScreen) {
+			return;
+		}
+		ZKOrig(void);
+		return;
+	}
+
+	objc_setAssociatedObject(self, &kQTFixDeferredKeydownShowKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	[self performSelector:@selector(showDueToKeyDownIfNeeded)
+			   withObject:nil
+			   afterDelay:0.0
+				  inModes:[NSArray arrayWithObject:NSDefaultRunLoopMode]];
+}
+
+// Cancelling (which setFullScreen:duration: does when a transition starts) also cancels the
+// re-deferred perform above, since it targets the same selector — but the deferral flag must be
+// cleared with it, or the next keydown show would mistake itself for a deferred fire.
+- (void)cancelAutomaticallyShowDueToKeyDown {
+	objc_setAssociatedObject(self, &kQTFixDeferredKeydownShowKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	ZKOrig(void);
+}
+
+
+@end
+
+
+
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGVideoPlaybackViewController, NSViewController);
+@implementation QTFixer_MGVideoPlaybackViewController
+
+// The fullscreen shortcut (⌃⌘F) also registers with the autovisibility controller's key-down
+// monitor, which would fade the hidden HUD in just as the transition begins. The monitor's
+// "deferred" show can't be cancelled from within setFullScreen:duration: — the menu-highlight
+// flash of the key equivalent spins the run loop, firing the show before the menu action runs.
+// So refuse it here, when the monitor examines the keystroke: a control+command chord is a menu
+// shortcut, not playback interaction. Genuine playback keys (space, arrows, …) are unaffected.
+- (BOOL)autovisibilityController:(id)arg1 shouldAutomaticallyShowDueToKeyDownEvent:(id)arg2 inView:(id)arg3 {
+	NSUInteger flags = [(NSEvent *)arg2 modifierFlags];
+	if ((flags & NSControlKeyMask) && (flags & NSCommandKeyMask)) {
+		return NO;
+	}
+	if (gQTFixAnimatingFullScreen) {
+		return NO;
+	}
+	return ZKOrig(BOOL, arg1, arg2, arg3);
+}
+
+@end
+
+
+
+
 EMPTY_SWIZZLE_INTERFACE(QTFixer_MGScrollEventHandlingHUDSlider, NSObject);
 @implementation QTFixer_MGScrollEventHandlingHUDSlider
 //Prevent an audio glitch.
@@ -246,16 +322,108 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_NSWindow, NSWindow);
 static const char kIsSettingMainViewControllerKey;
 
 // Declarations only, so we can call these without casting everything to id.
-// The first four are MGCinematicWindow properties; the last two are private NSWindow methods that
-// exist in Mavericks' AppKit.
+// These are MGCinematicWindow properties.
 @interface NSWindow (quickTimeFixerFullScreen)
 - (void)setHasRoundedCorners:(BOOL)arg1;
 - (void)setAutomaticallyConstrainsFrameRect:(BOOL)arg1;
 - (void)setMovingDisabled:(BOOL)arg1;
 - (void)setResizingDisabled:(BOOL)arg1;
-- (void)_startLiveResize;
-- (void)_endLiveResize;
+- (id)titlebarView;
 @end
+
+// Private window server API, stable on our frozen OS. CGSSetWindowTransform scales/positions a
+// window's existing backing store entirely on the window server, with no app-side redraw — the same
+// mechanism Exposé uses. This lets us animate the fullscreen zoom at 60fps: profiling showed the
+// stock animation was jumpy because every tick of an NSWindow frame animation re-lays-out, re-renders
+// (via a full client-side OpenGL pass), and re-uploads the entire window.
+typedef int CGSConnectionID;
+extern CGSConnectionID CGSDefaultConnectionForThread(void);
+extern CGError CGSSetWindowTransform(CGSConnectionID cid, uint32_t windowID, CGAffineTransform transform);
+
+static volatile long gQTFixZoomGeneration = 0;
+
+// Bumped on every animated setFullScreen:duration: call; a pending chrome-fade completion from an
+// older transition checks it and bails instead of starting a stale zoom.
+static long gQTFixTransitionGeneration = 0;
+
+// YES while a transition holds an [NSCursor hide] to keep a hidden cursor hidden. See
+// setFullScreen:duration:.
+static BOOL gQTFixCursorHideHeld = NO;
+
+
+// NSScreen-space rect (global, bottom-left origin) → CG global rect (top-left origin).
+static CGRect QTFixCGRectFromNSScreenRect(NSRect rect) {
+	CGFloat primaryHeight = [[[NSScreen screens] objectAtIndex:0] frame].size.height;
+	return CGRectMake(rect.origin.x, primaryHeight - NSMaxY(rect), rect.size.width, rect.size.height);
+}
+
+// Window server transform that displays a window whose backing store is backingSize scaled into the
+// CG-global rect. Empirically verified on 10.9: the transform maps screen points to window points,
+// so a window naturally placed at (x, y) has transform {1, 0, 0, 1, -x, -y}.
+static CGAffineTransform QTFixTransformForRect(CGRect rect, CGSize backingSize) {
+	CGFloat sx = backingSize.width / rect.size.width;
+	CGFloat sy = backingSize.height / rect.size.height;
+	return CGAffineTransformMake(sx, 0, 0, sy, -rect.origin.x * sx, -rect.origin.y * sy);
+}
+
+// kCAMediaTimingFunctionDefault, i.e. the cubic bezier with control points (0.25, 0.1), (0.25, 1.0).
+static double QTFixEase(double x) {
+	const double c1x = 0.25, c1y = 0.1, c2x = 0.25, c2y = 1.0;
+	if (x <= 0.0) return 0.0;
+	if (x >= 1.0) return 1.0;
+	double u = x;
+	for (int i = 0; i < 8; i++) {
+		double omu = 1.0 - u;
+		double xu = 3.0*c1x*omu*omu*u + 3.0*c2x*omu*u*u + u*u*u;
+		double dxdu = 3.0*c1x*(omu*omu - 2.0*omu*u) + 3.0*c2x*(2.0*omu*u - u*u) + 3.0*u*u;
+		if (dxdu < 1e-6) break;
+		u -= (xu - x) / dxdu;
+		if (u < 0.0) u = 0.0;
+		if (u > 1.0) u = 1.0;
+	}
+	double omu = 1.0 - u;
+	return 3.0*c1y*omu*omu*u + 3.0*c2y*omu*u*u + u*u*u;
+}
+
+// Immediately displays the window scaled into fromRect, then animates it to toRect. The ticking
+// runs on a background thread so main thread stalls (AppKit redraws menu bar items with freshly
+// compiled OpenCL kernels during the transition, among other things) can't drop animation frames.
+// Each tick is a single cheap window server call. The completion runs on the main thread; a newer
+// zoom (or generation bump) cancels both the ticking and the pending completion.
+static void QTFixAnimateWindowZoom(NSWindow *window, CGRect fromRect, CGRect toRect, double duration, void (^completion)(void)) {
+	CGSConnectionID cid = CGSDefaultConnectionForThread();
+	uint32_t windowID = (uint32_t)[window windowNumber];
+	CGSize backingSize = [window frame].size;
+	long generation = ++gQTFixZoomGeneration;
+
+	CGSSetWindowTransform(cid, windowID, QTFixTransformForRect(fromRect, backingSize));
+
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+		double start = CACurrentMediaTime();
+		for (long frame = 1; ; frame++) {
+			if (gQTFixZoomGeneration != generation) return;
+
+			double t = duration > 0.0 ? (CACurrentMediaTime() - start) / duration : 1.0;
+			if (t > 1.0) t = 1.0;
+			double e = QTFixEase(t);
+
+			CGRect r;
+			r.origin.x = fromRect.origin.x + (toRect.origin.x - fromRect.origin.x) * e;
+			r.origin.y = fromRect.origin.y + (toRect.origin.y - fromRect.origin.y) * e;
+			r.size.width = fromRect.size.width + (toRect.size.width - fromRect.size.width) * e;
+			r.size.height = fromRect.size.height + (toRect.size.height - fromRect.size.height) * e;
+			CGSSetWindowTransform(cid, windowID, QTFixTransformForRect(r, backingSize));
+
+			if (t >= 1.0) break;
+			double delay = (start + frame / 60.0) - CACurrentMediaTime();
+			if (delay > 0) usleep((useconds_t)(delay * 1e6));
+		}
+		dispatch_async(dispatch_get_main_queue(), ^{
+			if (gQTFixZoomGeneration != generation) return;
+			completion();
+		});
+	});
+}
 
 @interface QTFixer_MGDocumentWindowController : NSWindowController
 - (void)toggleFloating:(id)arg1;
@@ -384,58 +552,189 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 		![[NSUserDefaults standardUserDefaults] boolForKey:@"MGFullScreenNeverAnimate"]);
 
 	if (shouldAnimate) {
+		// The window geometry changes below make the window server cancel an active
+		// setHiddenUntilMouseMoves: (they count as synthetic mouse moves), which would flash
+		// the cursor at the end of the zoom. NSCursor's counted hide is immune to mouse moves,
+		// so hold one for the duration of the transition; the completion trades it back for
+		// setHiddenUntilMouseMoves:, keeping the cursor hidden until the mouse really moves.
+		BOOL cursorWasHidden = !CGCursorIsVisible();
+		if (cursorWasHidden && !gQTFixCursorHideHeld) {
+			gQTFixCursorHideHeld = YES;
+			[NSCursor hide];
+		}
+
+		// If we're cancelling an exit animation that never finished, the window's frame is still
+		// fullscreen-sized and *savedFrame still holds the real windowed frame — keep it.
+		BOOL wasMidAnimation = gQTFixAnimatingFullScreen;
+
+		ZKHookIvar(self, unsigned int, "_isFullScreen") |= QTFIX_ISANIMATINGFULLSCREEN;
+		gQTFixAnimatingFullScreen = YES;
+
 		if (arg1) {
-			*savedFrame = [window frame];
+			if (!wasMidAnimation) {
+				*savedFrame = [window frame];
+			}
 			QTFixConfigureWindowForFullScreen(window);
 		} else {
 			[window setHasRoundedCorners:YES];
 			[window setHasShadow:YES];
 		}
 
-		gQTFixAnimatingFullScreen = YES;
-		[window _startLiveResize];
+		// Unlike the stock animation, the window is laid out and rendered at its destination size
+		// exactly once, and the zoom scales that one rendering on the window server. Because the
+		// whole rendering scales, the titlebar and playback HUD must not be part of it — chrome
+		// visibly shrinking/growing with the window looks wrong. If chrome is showing, it first
+		// fades out at natural size exactly like the mouse-idle timeout (phase one), and only
+		// then does the zoom run (phase two). When chrome is already hidden — the common case
+		// when leaving fullscreen — the zoom starts immediately.
+		long transitionGeneration = ++gQTFixTransitionGeneration;
 
-		[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-			[context setDuration:arg2];
-			[context setTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionDefault]];
+		void (^performZoom)(double) = ^(double zoomDuration) {
+			// On entry the resize below happens with screen updates disabled, so nothing is
+			// visible until the zoom's from-transform has shrunk the fullscreen-sized window
+			// back into the old frame.
+			NSDisableScreenUpdates();
 
-			ZKHookIvar(self, unsigned int, "_isFullScreen") |= QTFIX_ISANIMATINGFULLSCREEN;
-			gQTFixAnimatingFullScreen = YES;
+			[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+				[context setDuration:0.0];
 
-			[(NSWindow *)[window animator] setFrame:destinationFrame display:YES];
-			[self updateTitlebarVisibility];
+				// Snap chrome to fully hidden in case anything re-showed it during the fade.
+				// Inside this zero-duration group the animator-proxy fades apply instantly.
+				@try {
+					[(id<QTFixAutovisibility>)[viewController valueForKey:@"autovisibilityController"] hide];
+				} @catch (NSException *exception) {}
 
-			NSRect destInWindow = [window convertRectFromScreen:destinationFrame];
-			NSRect destInSuperview = [superview convertRect:destInWindow fromView:nil];
-			NSSize destInMainView = [superview convertSize:destInSuperview.size toView:mainView];
+				// Hides the titlebar when entering. When exiting, the titlebar instead
+				// reappears with the final relayout in the zoom's completion.
+				if (arg1) {
+					[self updateTitlebarVisibility];
+				}
 
-			[[NSNotificationCenter defaultCenter]
-				postNotificationName:@"MGDocumentWindowControllerDidStartFullScreenAnimationNotification"
-				object:self
-				userInfo:[NSDictionary dictionaryWithObject:[NSValue valueWithSize:destInMainView]
-				forKey:@"MGDocumentWindowControllerFullScreenAnimationDestinationMainViewBoundsSizeKey"]
-			];
-		} completionHandler:^{
-			[[NSNotificationCenter defaultCenter]
-				postNotificationName:@"MGDocumentWindowControllerDidFinishFullScreenAnimationNotification"
-							  object:self];
+				NSRect destInWindow = [window convertRectFromScreen:destinationFrame];
+				NSRect destInSuperview = [superview convertRect:destInWindow fromView:nil];
+				NSSize destInMainView = [superview convertSize:destInSuperview.size toView:mainView];
 
-			ZKHookIvar(self, unsigned int, "_isFullScreen") &= ~QTFIX_ISANIMATINGFULLSCREEN;
-			gQTFixAnimatingFullScreen = NO;
-			[[[window contentView] superview] performSelector:@selector(unstickWindowButtonHoverState)
-												   withObject:nil
-												   afterDelay:0.7];
+				[[NSNotificationCenter defaultCenter]
+					postNotificationName:@"MGDocumentWindowControllerDidStartFullScreenAnimationNotification"
+					object:self
+					userInfo:[NSDictionary dictionaryWithObject:[NSValue valueWithSize:destInMainView]
+					forKey:@"MGDocumentWindowControllerFullScreenAnimationDestinationMainViewBoundsSizeKey"]
+				];
+			} completionHandler:nil];
 
-			[window _endLiveResize];
-
+			CGRect fromRect, toRect;
 			if (arg1) {
-				[window setHasShadow:NO];
-				[window setHasRoundedCorners:NO];
+				fromRect = QTFixCGRectFromNSScreenRect(ZKHookIvar(self, NSRect, "_savedNonFullScreenWindowFrame"));
+				toRect = QTFixCGRectFromNSScreenRect(destinationFrame);
+				[window setFrame:destinationFrame display:YES];
 			} else {
-				QTFixRestoreWindowFromFullScreen(self, window);
-				ZKHookIvar(self, NSRect, "_savedNonFullScreenWindowFrame") = NSZeroRect;
+				fromRect = QTFixCGRectFromNSScreenRect([window frame]);
+				toRect = QTFixCGRectFromNSScreenRect(destinationFrame);
+				// Bake the chrome-hidden state into the window before the zoom starts scaling it.
+				[window displayIfNeeded];
 			}
-		}];
+
+			QTFixAnimateWindowZoom(window, fromRect, toRect, zoomDuration, ^{
+				if (!arg1) {
+					// Give the window its real (small) frame back and let the titlebar reappear.
+					// The relayout happens with screen updates disabled so the swap from
+					// "fullscreen rendering scaled down" to "real windowed rendering" is a
+					// single visual change. The Finish notification is posted before the
+					// titlebar update because its handler undoes the autovisibility hide-state
+					// from the start of the animation, which would otherwise keep the titlebar
+					// hidden here.
+					NSDisableScreenUpdates();
+					[window setFrame:destinationFrame display:NO];
+
+					[[NSNotificationCenter defaultCenter]
+						postNotificationName:@"MGDocumentWindowControllerDidFinishFullScreenAnimationNotification"
+									  object:self];
+
+					[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+						[context setDuration:0.0];
+						[self updateTitlebarVisibility];
+					} completionHandler:nil];
+					[window displayIfNeeded];
+					CGSSetWindowTransform(
+						CGSDefaultConnectionForThread(),
+						(uint32_t)[window windowNumber],
+						QTFixTransformForRect(QTFixCGRectFromNSScreenRect(destinationFrame), destinationFrame.size)
+					);
+					NSEnableScreenUpdates();
+				} else {
+					[[NSNotificationCenter defaultCenter]
+						postNotificationName:@"MGDocumentWindowControllerDidFinishFullScreenAnimationNotification"
+									  object:self];
+				}
+
+				ZKHookIvar(self, unsigned int, "_isFullScreen") &= ~QTFIX_ISANIMATINGFULLSCREEN;
+				gQTFixAnimatingFullScreen = NO;
+				[[[window contentView] superview] performSelector:@selector(unstickWindowButtonHoverState)
+													   withObject:nil
+													   afterDelay:0.7];
+
+				if (arg1) {
+					[window setHasShadow:NO];
+					[window setHasRoundedCorners:NO];
+				} else {
+					QTFixRestoreWindowFromFullScreen(self, window);
+					ZKHookIvar(self, NSRect, "_savedNonFullScreenWindowFrame") = NSZeroRect;
+				}
+
+				if (gQTFixCursorHideHeld) {
+					gQTFixCursorHideHeld = NO;
+					[NSCursor setHiddenUntilMouseMoves:YES];
+					[NSCursor unhide];
+				}
+			});
+			NSEnableScreenUpdates();
+		};
+
+		// The keystroke that toggles fullscreen also registers with the autovisibility
+		// controller's key-down monitor, which schedules a deferred HUD show — so a hidden HUD
+		// would start fading in just as the transition begins. That scheduled show hasn't fired
+		// yet (it's a run loop perform and we're still in the same event dispatch), so cancel it
+		// before looking at what's visible.
+		@try {
+			[[viewController valueForKey:@"autovisibilityController"]
+				performSelector:@selector(cancelAutomaticallyShowDueToKeyDown)];
+		} @catch (NSException *exception) {}
+
+		// Phase one: if the titlebar or the playback HUD is currently visible, fade it out at
+		// natural size with the native auto-hide before any scaling happens.
+		BOOL chromeVisible = NO;
+		@try {
+			NSView *controlsView = [viewController valueForKey:@"controlsView"];
+			chromeVisible = (controlsView != nil && ![controlsView isHidden] && [controlsView alphaValue] > 0.0);
+		} @catch (NSException *exception) {}
+		if (!chromeVisible && [window respondsToSelector:@selector(titlebarView)]) {
+			NSView *titlebarView = [(id)window titlebarView];
+			chromeVisible = (titlebarView != nil && ![titlebarView isHidden] && [titlebarView alphaValue] > 0.0);
+		}
+
+		if (chromeVisible) {
+			// The whole transition still takes arg2: the chrome fade spends its share up front
+			// and the zoom is shortened to catch up, so we end in sync with the system-side
+			// transition just like the stock animation did. The fade matches the mouse-idle
+			// timeout's 0.25s unless arg2 is too short to fit it.
+			double fadeDuration = MIN(0.25, arg2 * 0.5);
+			double zoomDuration = arg2 - fadeDuration;
+
+			[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+				[context setDuration:fadeDuration];
+				@try {
+					[(id<QTFixAutovisibility>)[viewController valueForKey:@"autovisibilityController"] hide];
+				} @catch (NSException *exception) {}
+				if (arg1) {
+					[self updateTitlebarVisibility];
+				}
+			} completionHandler:^{
+				if (gQTFixTransitionGeneration != transitionGeneration) return;
+				performZoom(zoomDuration);
+			}];
+		} else {
+			performZoom(arg2);
+		}
 	} else {
 		if (arg1) {
 			*savedFrame = [window frame];
@@ -531,6 +830,8 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 	ZKSwizzle(QTFixer_AVAssetExportSession, AVAssetExportSession);
 	ZKSwizzle(QTFixer_MGDocumentViewController, MGDocumentViewController);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
+	ZKSwizzle(QTFixer_MGAutovisibilityController, MGAutovisibilityController);
+	ZKSwizzle(QTFixer_MGVideoPlaybackViewController, MGVideoPlaybackViewController);
 	ZKSwizzle(QTFixer_MGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
 	ZKSwizzle(QTFixer_MGPlayerController, MGPlayerController);
 	ZKSwizzle(QTFixer_MGNibViewMenuItem, MGNibViewMenuItem);
