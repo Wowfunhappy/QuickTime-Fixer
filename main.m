@@ -201,6 +201,24 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGPlayerController, NSController);
 
 
 
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGNibViewMenuItem, NSMenuItem);
+@implementation QTFixer_MGNibViewMenuItem
+
+// Chapter menu items normally install a custom view (from MGChapterMenuItemView.nib) when they
+// receive NSMenuDidBeginTrackingNotification. That view's title label is hardcoded white, which is
+// unreadable against Mavericks' white menus. On Mountain Lion the notification-based loading worked,
+// but on Mavericks the notification fires before menuNeedsUpdate: has created the items, so the
+// first time the chapter menu opens the items miss it and draw as ordinary (readable) text items;
+// on every later open the now-cached items catch the notification and turn white-on-white.
+// Suppress the view loading entirely so every open matches the readable first one. Video chapter
+// thumbnails still appear: they're delivered via setImage: on the item, not through this view.
+- (void)menuDidBeginTracking:(id)arg1 {}
+
+@end
+
+
+
+
 EMPTY_SWIZZLE_INTERFACE(QTFixer_QTHUDButton, NSControl);
 @implementation QTFixer_QTHUDButton
 //Tabbing between QTHUDButtons can cause QuickTime to crash. This behavior is annoying anyway.
@@ -515,6 +533,7 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
 	ZKSwizzle(QTFixer_MGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
 	ZKSwizzle(QTFixer_MGPlayerController, MGPlayerController);
+	ZKSwizzle(QTFixer_MGNibViewMenuItem, MGNibViewMenuItem);
 	ZKSwizzle(QTFixer_QTHUDButton, QTHUDButton);
 	ZKSwizzle(QTFixer_NSWindow, NSWindow);
 	ZKSwizzle(QTFixer_MGDocumentWindowController, MGDocumentWindowController);
