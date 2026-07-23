@@ -345,6 +345,17 @@ static BOOL gQTFixAnimatingFullScreen = NO;
 - (void)cancelAutomaticallyShowDueToKeyDown;
 @end
 
+// Typed access to the MGVideoView (fill-mode) methods we call. The contentFillMode values are
+// QuickTime's fullscreen zoom modes (names from its FullScreenZoomMode logging): 1 = ActualSize,
+// 2 = ProportionalFitToBounds ("Fit to Screen"), 3 = ProportionalFillBounds ("Fill Screen"),
+// 4 = StretchToBounds, 5 = PanoramicStretchToBounds ("Panoramic"), 6 = FixedSize.
+@protocol QTFixVideoFillMode <NSObject>
+- (int)contentFillMode;
+- (void)setContentFillMode:(int)mode;
+@end
+
+#define QTFIX_FILLMODE_PROPORTIONAL_FIT 2
+
 static const char kNeedsCheckWindowButtonsKey;
 @interface QTFixer_MGCinematicFrameView : NSView
 @end
@@ -645,6 +656,27 @@ static CGRect QTFixCGRectFromNSScreenRect(NSRect rect) {
 	return CGRectMake(rect.origin.x, primaryHeight - NSMaxY(rect), rect.size.width, rect.size.height);
 }
 
+// The rect a window of the given aspect ratio occupies when scaled to fit container, centered —
+// i.e. where the video lands within the screen in fullscreen.
+static NSRect QTFixAspectFitRect(NSSize size, NSRect container) {
+	if (size.width <= 0 || size.height <= 0 ||
+			container.size.width <= 0 || container.size.height <= 0) {
+		return container;
+	}
+	CGFloat scale = MIN(container.size.width / size.width, container.size.height / size.height);
+	NSSize scaled = NSMakeSize(size.width * scale, size.height * scale);
+	return NSMakeRect(
+		container.origin.x + (container.size.width - scaled.width) * 0.5,
+		container.origin.y + (container.size.height - scaled.height) * 0.5,
+		scaled.width, scaled.height
+	);
+}
+
+static BOOL QTFixRectsNearlyEqual(NSRect a, NSRect b) {
+	return fabs(a.origin.x - b.origin.x) <= 2.0 && fabs(a.origin.y - b.origin.y) <= 2.0 &&
+		fabs(a.size.width - b.size.width) <= 2.0 && fabs(a.size.height - b.size.height) <= 2.0;
+}
+
 // Window server transform that displays a window whose backing store is backingSize scaled into the
 // CG-global rect. Empirically verified on 10.9: the transform maps screen points to window points,
 // so a window naturally placed at (x, y) has transform {1, 0, 0, 1, -x, -y}.
@@ -718,9 +750,16 @@ static void QTFixAnimateWindowZoom(NSWindow *window, CGRect fromRect, CGRect toR
 - (BOOL)isFloating;
 - (void)updateTitlebarVisibility;
 - (struct CGSize)adjustedNaturalContentSize;
+- (struct CGSize)unconstrainedMinimumWindowContentSize;
 - (BOOL)isContentResizable;
 - (void)resizeWindowToFitContent;
 @property (nonatomic, strong) id currentMainViewController;
+@end
+
+// The MGVisualContentContainer methods adjustedNaturalContentSize consults.
+@protocol QTFixVisualContent <NSObject>
+- (NSSize)naturalContentSize;
+- (BOOL)prefersConstrainedContentAspectRatio;
 @end
 
 // Bits within the bitfield storage unit that ZKHookIvar hands back for any one of these ivars.
@@ -808,6 +847,39 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 	return NO;
 }
 
+// QuickTime 10.2 pads a video's aspect ratio so that a window 640 points tall would still be
+// wide enough for the minimum window content width (the HUD plus its margins, 480 points).
+// For a sufficiently vertical video that widens the aspect ratio itself — e.g. a 1080x1920
+// video becomes 1440x1920 — so the window shows black bars beside the video at every size.
+// QuickTime 10.3 instead pads against the screen's visible height: the width only has to
+// reach the minimum once the window is as tall as the screen allows, which a portrait video
+// on a landscape screen easily satisfies. This is a port of 10.3's implementation.
+//
+// Every other sizing rule derives from this method, so no bars appear at any window size,
+// and minimumWindowContentSize still scales the (now correct) aspect ratio up until the
+// width fits the HUD — the window simply stops shrinking before the HUD could overflow.
+- (struct CGSize)adjustedNaturalContentSize {
+	id<QTFixVisualContent> viewController = [self currentMainViewController];
+	if (viewController == nil || ![viewController respondsToSelector:@selector(naturalContentSize)]) {
+		return NSZeroSize;
+	}
+
+	NSSize size = [viewController naturalContentSize];
+	if ([viewController respondsToSelector:@selector(prefersConstrainedContentAspectRatio)] &&
+			[viewController prefersConstrainedContentAspectRatio]) {
+		NSSize minimumSize = [self unconstrainedMinimumWindowContentSize];
+		CGFloat minScreenWidth = DBL_MAX, minScreenHeight = DBL_MAX;
+		for (NSScreen *screen in [NSScreen screens]) {
+			NSRect visible = [screen visibleFrame];
+			minScreenWidth = MIN(minScreenWidth, visible.size.width);
+			minScreenHeight = MIN(minScreenHeight, visible.size.height);
+		}
+		size.width = fmax(size.width, floor(minimumSize.width * size.height / minScreenHeight));
+		size.height = fmax(size.height, floor(minimumSize.height * size.width / minScreenWidth));
+	}
+	return size;
+}
+
 - (id)customWindowsToEnterFullScreenForWindow:(id)arg1 {
 	if ([self isFloating]) {
 		[self toggleFloating:nil];
@@ -851,6 +923,13 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 			[NSCursor hide];
 		}
 
+		// The video view, when this document has one. Used for fullscreen zoom-mode (fill-mode)
+		// handling; everything below degrades gracefully when it's nil.
+		id<QTFixVideoFillMode> videoView = nil;
+		@try {
+			videoView = [viewController valueForKey:@"videoView"];
+		} @catch (NSException *exception) {}
+
 		// If we're cancelling an exit animation that never finished, the window's frame is still
 		// fullscreen-sized and *savedFrame still holds the real windowed frame — keep it.
 		BOOL wasMidAnimation = gQTFixAnimatingFullScreen;
@@ -868,6 +947,39 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 			[window setHasShadow:YES];
 		}
 
+		// A video that doesn't fill the screen sits between black bars in fullscreen, and
+		// those bars are only indistinguishable from the backdrop behind the window while
+		// that backdrop is still fully black — which stops being true the moment the
+		// system's exit transition starts revealing the desktop. So when exiting, shed the
+		// bars as early as possible by shrinking the window to just the rect the video
+		// occupies on screen. Visually nothing changes — the bar area simply becomes
+		// backdrop, and the video and HUD keep their exact positions in the shrunk window
+		// (it is centered and full-height, and the HUD centers itself). This also makes
+		// the window's aspect ratio match the windowed frame, so the zoom below scales
+		// this full-resolution rendering down without distortion.
+		//
+		// In the Fit to Screen zoom mode that shrink is possible immediately. In any other
+		// mode (Fill Screen, Panoramic, ...) the video itself is covering some or all of the
+		// bar area, so the mode must be left first: phase one below fades the video back into
+		// its fitted, letterboxed shape — QuickTime's own animated zoom-mode change, run
+		// while the window still covers the whole screen, so it plays out against pure
+		// window-black no matter what the backdrop is doing — and the bars are shed when it
+		// lands, in the same breath the zoom starts moving the window, so the backdrop
+		// change behind them is masked by the motion.
+		NSRect exitVideoRect = NSZeroRect;
+		BOOL exitSheddingDeferred = NO;
+		if (!arg1) {
+			exitVideoRect = QTFixAspectFitRect(destinationFrame.size, [window frame]);
+			BOOL hasBars = !QTFixRectsNearlyEqual(exitVideoRect, [window frame]);
+			exitSheddingDeferred = hasBars && videoView != nil &&
+				[videoView contentFillMode] != QTFIX_FILLMODE_PROPORTIONAL_FIT;
+			if (hasBars && !exitSheddingDeferred) {
+				NSDisableScreenUpdates();
+				[window setFrame:exitVideoRect display:YES];
+				NSEnableScreenUpdates();
+			}
+		}
+
 		// Unlike the stock animation, the window is laid out and rendered at its destination size
 		// exactly once, and the zoom scales that one rendering on the window server. Because the
 		// whole rendering scales, the titlebar and playback HUD must not be part of it — chrome
@@ -878,10 +990,29 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 		long transitionGeneration = ++gQTFixTransitionGeneration;
 
 		void (^performZoom)(double) = ^(double zoomDuration) {
-			// On entry the resize below happens with screen updates disabled, so nothing is
-			// visible until the zoom's from-transform has shrunk the fullscreen-sized window
-			// back into the old frame.
+			// The geometry changes below happen with screen updates disabled, so nothing is
+			// visible until the zoom's from-transform is in place.
 			NSDisableScreenUpdates();
+
+			// The zoom scales a single baked rendering of the window, so every rect that
+			// rendering is scaled into must have the rendering's aspect ratio — otherwise the
+			// scaling is non-uniform and the video visibly smushes. When the video fills the
+			// screen (the common 16:9-video-on-16:9-screen case), the windowed and fullscreen
+			// renderings have the same aspect ratio and we bake the fullscreen one — pixel-exact
+			// at the fullscreen end, downscaled at the windowed end. When it doesn't (e.g. a
+			// vertical video), the fullscreen rendering is the video plus black bars, and no
+			// rect with the window's aspect ratio can hold it without distortion. So we bake
+			// the windowed rendering (which is exactly the video) instead, and zoom it between
+			// the windowed frame and the rect the video occupies within the fullscreen screen.
+			// The bars then exist only in the true fullscreen state, and swapping that state in
+			// or out at the fullscreen end of the zoom is invisible: the bars are black against
+			// the black backdrop the fullscreen transition runs on.
+			NSRect windowedFrame = arg1 ? ZKHookIvar(self, NSRect, "_savedNonFullScreenWindowFrame") : destinationFrame;
+			NSRect screenFrame = arg1 ? destinationFrame : [window frame];
+			NSRect fittedRect = QTFixAspectFitRect(windowedFrame.size, screenFrame);
+			BOOL videoFillsScreen = QTFixRectsNearlyEqual(fittedRect, screenFrame);
+
+			__block int deferredFillMode = 0;
 
 			[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
 				[context setDuration:0.0];
@@ -908,40 +1039,77 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 					userInfo:[NSDictionary dictionaryWithObject:[NSValue valueWithSize:destInMainView]
 					forKey:@"MGDocumentWindowControllerFullScreenAnimationDestinationMainViewBoundsSizeKey"]
 				];
+
+				// The Start notification's handler just applied the fullscreen zoom mode to the
+				// video view. When the video doesn't fill the screen, the zoom's baked rendering
+				// must letterbox exactly into the fitted rect, so a non-Fit mode (Fill Screen,
+				// Panoramic, ...) can't be part of the transition: put Fit back for now — still
+				// inside the zero-duration group, so nothing flashes — and remember the real
+				// mode. The zoom's completion re-applies it with QuickTime's own animated
+				// zoom-mode change, once the window really is fullscreen.
+				if (arg1 && !videoFillsScreen && videoView != nil) {
+					int fullScreenFillMode = [videoView contentFillMode];
+					if (fullScreenFillMode != QTFIX_FILLMODE_PROPORTIONAL_FIT) {
+						deferredFillMode = fullScreenFillMode;
+						[videoView setContentFillMode:QTFIX_FILLMODE_PROPORTIONAL_FIT];
+					}
+				}
 			} completionHandler:nil];
 
 			CGRect fromRect, toRect;
 			if (arg1) {
-				fromRect = QTFixCGRectFromNSScreenRect(ZKHookIvar(self, NSRect, "_savedNonFullScreenWindowFrame"));
-				toRect = QTFixCGRectFromNSScreenRect(destinationFrame);
-				[window setFrame:destinationFrame display:YES];
+				fromRect = QTFixCGRectFromNSScreenRect(windowedFrame);
+				if (videoFillsScreen) {
+					toRect = QTFixCGRectFromNSScreenRect(destinationFrame);
+					[window setFrame:destinationFrame display:YES];
+				} else {
+					// The window keeps its windowed frame (and rendering) for the whole zoom;
+					// the real fullscreen frame arrives in the zoom's completion.
+					toRect = QTFixCGRectFromNSScreenRect(fittedRect);
+					// Bake the chrome-hidden state into the window before the zoom scales it.
+					[window displayIfNeeded];
+				}
 			} else {
-				fromRect = QTFixCGRectFromNSScreenRect([window frame]);
 				toRect = QTFixCGRectFromNSScreenRect(destinationFrame);
-				// Bake the chrome-hidden state into the window before the zoom starts scaling it.
-				[window displayIfNeeded];
+				if (videoFillsScreen) {
+					fromRect = QTFixCGRectFromNSScreenRect(screenFrame);
+					// Bake the chrome-hidden state into the window before the zoom scales it.
+					[window displayIfNeeded];
+				} else {
+					// Give the window its real (small) frame and windowed rendering up front.
+					// The zoom starts with that rendering scaled over the video's fullscreen
+					// position, which looks the same as the fullscreen rendering it replaces
+					// minus the black bars — dropped invisibly against the black backdrop.
+					fromRect = QTFixCGRectFromNSScreenRect(fittedRect);
+					[window setFrame:destinationFrame display:YES];
+				}
 			}
 
 			QTFixAnimateWindowZoom(window, fromRect, toRect, zoomDuration, ^{
-				if (!arg1) {
-					// Give the window its real (small) frame back and let the titlebar reappear.
-					// The relayout happens with screen updates disabled so the swap from
-					// "fullscreen rendering scaled down" to "real windowed rendering" is a
-					// single visual change. The Finish notification is posted before the
-					// titlebar update because its handler undoes the autovisibility hide-state
-					// from the start of the animation, which would otherwise keep the titlebar
-					// hidden here.
+				if (!arg1 || !videoFillsScreen) {
+					// Give the window its real final frame and rendering. The relayout happens
+					// with screen updates disabled so the swap between "baked rendering scaled
+					// by the zoom" and "real rendering at the final frame" is a single visual
+					// change (when exiting, that swap already happened at the start of the zoom
+					// and the frame is final; only the titlebar relayout remains). The Finish
+					// notification is posted before the titlebar update because its handler
+					// undoes the autovisibility hide-state from the start of the animation,
+					// which would otherwise keep the titlebar hidden when exiting.
 					NSDisableScreenUpdates();
-					[window setFrame:destinationFrame display:NO];
+					if (!NSEqualRects([window frame], destinationFrame)) {
+						[window setFrame:destinationFrame display:NO];
+					}
 
 					[[NSNotificationCenter defaultCenter]
 						postNotificationName:@"MGDocumentWindowControllerDidFinishFullScreenAnimationNotification"
 									  object:self];
 
-					[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-						[context setDuration:0.0];
-						[self updateTitlebarVisibility];
-					} completionHandler:nil];
+					if (!arg1) {
+						[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+							[context setDuration:0.0];
+							[self updateTitlebarVisibility];
+						} completionHandler:nil];
+					}
 					[window displayIfNeeded];
 					CGSSetWindowTransform(
 						CGSDefaultConnectionForThread(),
@@ -953,6 +1121,13 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 					[[NSNotificationCenter defaultCenter]
 						postNotificationName:@"MGDocumentWindowControllerDidFinishFullScreenAnimationNotification"
 									  object:self];
+				}
+
+				// The transition ran in Fit to Screen; now that the real fullscreen frame is on
+				// screen, bring in the user's actual zoom mode with QuickTime's own animated
+				// change — the same transition the View menu uses in fullscreen.
+				if (deferredFillMode != 0) {
+					[(id<QTFixVideoFillMode>)[(NSView *)videoView animator] setContentFillMode:deferredFillMode];
 				}
 
 				ZKHookIvar(self, unsigned int, "_isFullScreen") &= ~QTFIX_ISANIMATINGFULLSCREEN;
@@ -1000,7 +1175,7 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 			chromeVisible = (titlebarView != nil && ![titlebarView isHidden] && [titlebarView alphaValue] > 0.0);
 		}
 
-		if (chromeVisible) {
+		if (chromeVisible || exitSheddingDeferred) {
 			// The whole transition still takes arg2: the chrome fade spends its share up front
 			// and the zoom is shortened to catch up, so we end in sync with the system-side
 			// transition just like the stock animation did. The fade matches the mouse-idle
@@ -1016,8 +1191,21 @@ static void QTFixRestoreWindowFromFullScreen(QTFixer_MGDocumentWindowController 
 				if (arg1) {
 					[self updateTitlebarVisibility];
 				}
+				// Leave the fullscreen zoom mode: fade the video back into its fitted,
+				// letterboxed shape (concurrently with the chrome fade, if any).
+				if (exitSheddingDeferred) {
+					[(id<QTFixVideoFillMode>)[(NSView *)videoView animator] setContentFillMode:QTFIX_FILLMODE_PROPORTIONAL_FIT];
+				}
 			} completionHandler:^{
 				if (gQTFixTransitionGeneration != transitionGeneration) return;
+				if (exitSheddingDeferred) {
+					// The video has left the bar area, so the bars can be shed now (see the
+					// comment above exitVideoRect). The zoom starts moving the window in the
+					// same run loop turn, masking the backdrop change where the bars were.
+					NSDisableScreenUpdates();
+					[window setFrame:exitVideoRect display:YES];
+					NSEnableScreenUpdates();
+				}
 				performZoom(zoomDuration);
 			}];
 		} else {
@@ -1129,7 +1317,6 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 + (void)load {
 	ZKSwizzle(QTFixer_AVPlayerItem, AVPlayerItem);
 	ZKSwizzle(QTFixer_AVAssetExportSession, AVAssetExportSession);
-	// Fix for export error -12780
 	ZKSwizzle(QTFixer_NSFileManager, NSFileManager);
 	ZKSwizzle(QTFixer_MGDocumentViewController, MGDocumentViewController);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
