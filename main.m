@@ -492,6 +492,50 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGVideoPlaybackViewController, NSViewController)
 
 
 
+// The playback HUD starts out at an aestetically pleasing position,
+// but once dragged away, it's difficult to put back by hand.
+// Make the home position magnetic.
+// MGDraggableView's mouseDown: runs a tracking loop that repositions the view with setFrameOrigin:,
+// so while a drag is in progress, any origin landing near home snaps to it exactly.
+//
+// The home position comes from the nib (MGMovieDocumentView / MGPlayerDocumentView): the HUD is
+// 440x59 at (20, 20) in a 480x240 view, with fixed size and all four margins flexible. An untouched
+// HUD is therefore positioned purely by NSView autoresizing, which scales the flexible margins
+// proportionally no matter how the view reaches its current size: the equal left/right margins keep
+// it exactly centered, and the bottom margin keeps its nib share — 20 of the 240 - 59 = 181 points
+// of flexible vertical space.
+
+static BOOL gQTFixDraggingHUD = NO;
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDraggableView, NSView);
+@implementation QTFixer_MGDraggableView
+
+- (void)mouseDown:(id)arg1 {
+	gQTFixDraggingHUD = YES;
+	ZKOrig(void, arg1);
+	gQTFixDraggingHUD = NO;
+}
+
+- (void)setFrameOrigin:(NSPoint)origin {
+	if (gQTFixDraggingHUD && [self superview] != nil) {
+		NSRect bounds = [[self superview] bounds];
+		NSSize size = [self frame].size;
+		NSPoint home = NSMakePoint(
+			bounds.origin.x + (bounds.size.width - size.width) * 0.5,
+			bounds.origin.y + (bounds.size.height - size.height) * (20.0 / 181.0)
+		);
+		if (fabs(origin.x - home.x) <= 20.0 && fabs(origin.y - home.y) <= 20.0) {
+			origin = home;
+		}
+	}
+	ZKOrig(void, origin);
+}
+
+@end
+
+
+
+
 EMPTY_SWIZZLE_INTERFACE(QTFixer_MGScrollEventHandlingHUDSlider, NSObject);
 @implementation QTFixer_MGScrollEventHandlingHUDSlider
 //Prevent an audio glitch.
@@ -1091,6 +1135,7 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
 	ZKSwizzle(QTFixer_MGAutovisibilityController, MGAutovisibilityController);
 	ZKSwizzle(QTFixer_MGVideoPlaybackViewController, MGVideoPlaybackViewController);
+	ZKSwizzle(QTFixer_MGDraggableView, MGDraggableView);
 	ZKSwizzle(QTFixer_MGScrollEventHandlingHUDSlider, MGScrollEventHandlingHUDSlider);
 	ZKSwizzle(QTFixer_MGPlayerController, MGPlayerController);
 	ZKSwizzle(QTFixer_MGNibViewMenuItem, MGNibViewMenuItem);
