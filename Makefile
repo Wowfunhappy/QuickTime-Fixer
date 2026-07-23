@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CC = clang
-CFLAGS = -dynamiclib -framework Foundation -framework AppKit -framework AVFoundation -framework QuartzCore -fobjc-arc
+CFLAGS = -dynamiclib -framework Foundation -framework AppKit -framework AVFoundation -framework CoreMedia -framework QuartzCore -fobjc-arc
 OUTPUT = QuickTimeFixer.dylib
 SOURCES = main.m ZKSwizzle/ZKSwizzle.m
 INSTALL_PATH = /Applications/QuickTime Player.app/Contents/Frameworks

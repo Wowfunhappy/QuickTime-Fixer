@@ -50,11 +50,246 @@
 
 
 
+// ===== Fix for export error -12780 caused by malformed source MP4s =====
+//
+// Some MP4 files (notably yt-dlp / DASH downloads) end their audio track with a final
+// zero-duration sample, giving the audio time-to-sample table ('stts') more than one
+// entry. OS X 10.9's AVFoundation export engine (FigRemaker) fails any export whose
+// composition references such an audio track, with the generic error -12780 -- even
+// though playback of these files works fine. (Determined empirically: exports of such
+// files fail in a minimal test program on 10.9; rewriting the table as a single uniform
+// entry makes them succeed, and no other difference matters.)
+//
+// The fix: when QuickTime's export machinery loads a source movie, scan its audio
+// 'stts' tables. If a table shows the problem pattern (uniform sample durations plus a
+// single odd-duration final sample), make a temporary copy of the file with the table
+// rewritten as one uniform entry -- a ~20 byte change, no re-encode -- and let the
+// export read that copy instead. Copies are cached per (size, mtime, name), so each
+// source file is only copied once. Playback is untouched: this hook is only reached
+// through the export path's asset loading.
+
+static unsigned int QTFixRead32(const unsigned char *p) {
+	return ((unsigned int)p[0] << 24) | ((unsigned int)p[1] << 16) | ((unsigned int)p[2] << 8) | p[3];
+}
+
+// One patchable stts box: rewrite as a single entry of sampleCount x sampleDelta.
+// fileOffset is the absolute offset of the stts box in the file.
+struct QTFixSttsPatch {
+	unsigned long long fileOffset;
+	unsigned int boxSize;
+	unsigned int sampleCount;
+	unsigned int sampleDelta;
+};
+
+// Walks box children in [start, end) of moov data, collecting patchable audio stts boxes.
+// Recursion is restricted to the containers on the trak->stbl path.
+static void QTFixScanBoxes(const unsigned char *moov, unsigned long long moovFileOffset,
+		unsigned long long start, unsigned long long end, BOOL *trakIsAudio,
+		struct QTFixSttsPatch *patches, unsigned int *patchCount, unsigned int maxPatches) {
+	unsigned long long pos = start;
+	while (pos + 8 <= end) {
+		unsigned long long size = QTFixRead32(moov + pos);
+		const unsigned char *type = moov + pos + 4;
+		if (size < 8) break;  // 64-bit and zero-size boxes don't occur inside moov's path
+		if (pos + size > end) break;
+
+		if (memcmp(type, "trak", 4) == 0) {
+			BOOL isAudio = NO;
+			QTFixScanBoxes(moov, moovFileOffset, pos + 8, pos + size, &isAudio, patches, patchCount, maxPatches);
+		} else if (memcmp(type, "mdia", 4) == 0 || memcmp(type, "minf", 4) == 0 || memcmp(type, "stbl", 4) == 0) {
+			QTFixScanBoxes(moov, moovFileOffset, pos + 8, pos + size, trakIsAudio, patches, patchCount, maxPatches);
+		} else if (memcmp(type, "hdlr", 4) == 0 && trakIsAudio != NULL) {
+			// handler subtype is at payload offset 8 (component subtype)
+			if (size >= 24 && memcmp(moov + pos + 16, "soun", 4) == 0) {
+				*trakIsAudio = YES;
+			}
+		} else if (memcmp(type, "stts", 4) == 0 && trakIsAudio != NULL && *trakIsAudio && *patchCount < maxPatches) {
+			unsigned int entryCount = QTFixRead32(moov + pos + 12);
+			if (entryCount >= 2 && size >= 16 + 8ULL * entryCount) {
+				// Problem pattern: all entries share one delta, except a final 1-sample entry.
+				unsigned int uniformDelta = QTFixRead32(moov + pos + 16 + 4);
+				unsigned long long totalSamples = 0;
+				BOOL uniform = YES;
+				for (unsigned int i = 0; i < entryCount - 1; i++) {
+					if (QTFixRead32(moov + pos + 16 + 8 * i + 4) != uniformDelta) uniform = NO;
+					totalSamples += QTFixRead32(moov + pos + 16 + 8 * i);
+				}
+				unsigned int lastCount = QTFixRead32(moov + pos + 16 + 8 * (entryCount - 1));
+				unsigned int lastDelta = QTFixRead32(moov + pos + 16 + 8 * (entryCount - 1) + 4);
+				totalSamples += lastCount;
+				if (uniform && lastCount == 1 && lastDelta != uniformDelta &&
+						uniformDelta > 0 && totalSamples <= 0xFFFFFFFFULL) {
+					patches[*patchCount].fileOffset = moovFileOffset + pos;
+					patches[*patchCount].boxSize = (unsigned int)size;
+					patches[*patchCount].sampleCount = (unsigned int)totalSamples;
+					patches[*patchCount].sampleDelta = uniformDelta;
+					(*patchCount)++;
+				}
+			}
+		}
+		pos += size;
+	}
+}
+
+// Finds patchable audio stts boxes in an MP4/MOV file. Returns the number found.
+static unsigned int QTFixFindAudioSttsPatches(NSString *path,
+		struct QTFixSttsPatch *patches, unsigned int maxPatches) {
+	NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:path];
+	if (fh == nil) return 0;
+
+	unsigned int found = 0;
+	@try {
+		unsigned long long fileSize = [fh seekToEndOfFile];
+		unsigned long long pos = 0;
+		while (pos + 8 <= fileSize) {
+			[fh seekToFileOffset:pos];
+			NSData *header = [fh readDataOfLength:16];
+			if ([header length] < 8) break;
+			const unsigned char *h = [header bytes];
+			unsigned long long size = QTFixRead32(h);
+			if (size == 1 && [header length] >= 16) {
+				size = ((unsigned long long)QTFixRead32(h + 8) << 32) | QTFixRead32(h + 12);
+			} else if (size == 0) {
+				size = fileSize - pos;
+			}
+			if (size < 8) break;
+
+			if (memcmp(h + 4, "moov", 4) == 0) {
+				if (size > 200 * 1024 * 1024) break;  // absurd moov; bail
+				[fh seekToFileOffset:pos];
+				NSData *moov = [fh readDataOfLength:(NSUInteger)size];
+				if ([moov length] == size) {
+					QTFixScanBoxes([moov bytes], pos, 8, size, NULL, patches, &found, maxPatches);
+				}
+				break;
+			}
+			pos += size;
+		}
+	} @catch (NSException *exception) {
+		found = 0;
+	}
+	[fh closeFile];
+	return found;
+}
+
+// Resolves an asset URL (possibly a file-reference URL with a ?applesecurityscope=
+// query, as stored by QuickTime's media clips) to a plain filesystem path.
+static NSString *QTFixLocalPathForAssetURL(NSURL *url) {
+	if (url == nil || ![url isFileURL]) return nil;
+	NSString *absolute = [url absoluteString];
+	NSRange query = [absolute rangeOfString:@"?"];
+	if (query.location != NSNotFound) {
+		url = [NSURL URLWithString:[absolute substringToIndex:query.location]];
+	}
+	NSURL *pathURL = [url filePathURL];
+	if (pathURL == nil) pathURL = url;
+	return [pathURL path];
+}
+
+// If the file at the given URL has the malformed audio stts pattern, returns the URL of
+// a patched (cached) temporary copy. Returns nil when no substitution is needed.
+static NSURL *QTFixPatchedCopyIfNeeded(NSURL *url) {
+	NSString *path = QTFixLocalPathForAssetURL(url);
+	if (path == nil) return nil;
+
+	struct QTFixSttsPatch patches[8];
+	unsigned int patchCount = QTFixFindAudioSttsPatches(path, patches, 8);
+	if (patchCount == 0) return nil;
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSDictionary *attributes = [fm attributesOfItemAtPath:path error:nil];
+	unsigned long long sourceSize = [[attributes objectForKey:NSFileSize] unsignedLongLongValue];
+	NSTimeInterval mtime = [[attributes objectForKey:NSFileModificationDate] timeIntervalSince1970];
+
+	NSString *cacheDir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"QTFixPatchedMedia"];
+	[fm createDirectoryAtPath:cacheDir withIntermediateDirectories:YES attributes:nil error:nil];
+	NSString *cachePath = [cacheDir stringByAppendingPathComponent:
+		[NSString stringWithFormat:@"%llx-%llx-%@", sourceSize, (unsigned long long)mtime, [path lastPathComponent]]];
+
+	if (![fm fileExistsAtPath:cachePath]) {
+		NSLog(@"QuickTimeFixer: %@ has a malformed audio sample table that would make the "
+			"export fail with error -12780; making a patched copy for the export to use.", [path lastPathComponent]);
+		NSString *inProgressPath = [cachePath stringByAppendingString:@".inprogress"];
+		[fm removeItemAtPath:inProgressPath error:nil];
+		NSError *copyError = nil;
+		if (![fm copyItemAtPath:path toPath:inProgressPath error:&copyError]) {
+			NSLog(@"QuickTimeFixer: could not copy source movie (%@); export will use the original.", copyError);
+			return nil;
+		}
+
+		NSFileHandle *fh = [NSFileHandle fileHandleForUpdatingAtPath:inProgressPath];
+		if (fh == nil) {
+			[fm removeItemAtPath:inProgressPath error:nil];
+			return nil;
+		}
+		for (unsigned int i = 0; i < patchCount; i++) {
+			// stts layout: size(4) 'stts'(4) versionAndFlags(4) entryCount(4) entries(8 each).
+			// Rewrite as a single entry covering every sample, and zero the leftover
+			// entry space (it lies inside the box but beyond the declared entries).
+			unsigned char payload[16];
+			payload[0] = 0; payload[1] = 0; payload[2] = 0; payload[3] = 1;
+			payload[4] = (patches[i].sampleCount >> 24) & 0xFF;
+			payload[5] = (patches[i].sampleCount >> 16) & 0xFF;
+			payload[6] = (patches[i].sampleCount >> 8) & 0xFF;
+			payload[7] = patches[i].sampleCount & 0xFF;
+			payload[8] = (patches[i].sampleDelta >> 24) & 0xFF;
+			payload[9] = (patches[i].sampleDelta >> 16) & 0xFF;
+			payload[10] = (patches[i].sampleDelta >> 8) & 0xFF;
+			payload[11] = patches[i].sampleDelta & 0xFF;
+			@try {
+				[fh seekToFileOffset:patches[i].fileOffset + 12];
+				[fh writeData:[NSData dataWithBytes:payload length:12]];
+				NSUInteger leftover = patches[i].boxSize - 24;
+				if (leftover > 0) {
+					[fh writeData:[NSMutableData dataWithLength:leftover]];
+				}
+			} @catch (NSException *exception) {
+				NSLog(@"QuickTimeFixer: failed to patch copy: %@", exception);
+				[fh closeFile];
+				[fm removeItemAtPath:inProgressPath error:nil];
+				return nil;
+			}
+		}
+		[fh closeFile];
+		[fm removeItemAtPath:cachePath error:nil];
+		if (![fm moveItemAtPath:inProgressPath toPath:cachePath error:nil]) {
+			[fm removeItemAtPath:inProgressPath error:nil];
+			return nil;
+		}
+	}
+	return [NSURL fileURLWithPath:cachePath];
+}
+
 EMPTY_SWIZZLE_INTERFACE(QTFixer_AVAssetExportSession, AVAssetExportSession);
 @implementation QTFixer_AVAssetExportSession
 
 //Apple removed this method from AVFoundation, but all we need is the stub.
 - (void)setUsesHardwareVideoEncoderIfAvailable:(BOOL)arg1 {}
+
+@end
+
+
+
+
+EMPTY_SWIZZLE_INTERFACE(QTFixer_NSFileManager, NSFileManager);
+@implementation QTFixer_NSFileManager
+
+// QuickTime's export names its temporary output file ".MG-<uuid>" — a dot-file. It then adjusts
+// that URL's extension with URLByDeletingPathExtension / URLByAppendingPathExtension:. On
+// OS X 10.9, URLByDeletingPathExtension treats a dot-file's entire name as an extension and
+// deletes it (10.8 left dot-files alone), so ".../(A Document Being Saved)/.MG-<uuid>" collapses
+// into ".../(A Document Being Saved)" and the appended extension renames the *directory*. The
+// export session is then pointed at a directory URL and fails with error -12780. Dropping the
+// leading dot gives a name whose extension handling works the same on both OS versions.
+- (id)temporaryLocationForSavingURL:(id)arg1 error:(id *)arg2 {
+	NSURL *result = ZKOrig(id, arg1, arg2);
+	NSString *name = [result lastPathComponent];
+	if ([name hasPrefix:@"."]) {
+		result = [[result URLByDeletingLastPathComponent]
+			URLByAppendingPathComponent:[name substringFromIndex:1]];
+	}
+	return result;
+}
 
 @end
 
@@ -67,7 +302,7 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentViewController, NSViewController);
 - (void)loadView {
 	ZKOrig(void);
 	if (
-		[self isKindOfClass:NSClassFromString(@"MGAudioPlaybackViewController")] || 
+		[self isKindOfClass:NSClassFromString(@"MGAudioPlaybackViewController")] ||
 		[self isKindOfClass:NSClassFromString(@"MGVideoPlaybackViewController")]
 	) {
 		[self runUserScript:@"userFileOpenedScript"];
@@ -821,6 +1056,19 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGDocumentController, NSDocumentController);
 EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 @implementation QTFixer_MGAssetLoader
 
+// Export-path asset loading. Substitutes a patched copy for source movies whose
+// malformed audio sample tables would make the export fail with error -12780.
+// (Playback loads assets through MGAssetLoader instance methods, not this one,
+// so it is unaffected.)
++ (id)synchronouslyLoadedAssetWithURL:(id)arg1 assetOptions:(id)arg2 keysForInitialAssetValuesToLoad:(id)arg3 error:(id *)arg4 {
+	NSURL *substitute = QTFixPatchedCopyIfNeeded((NSURL *)arg1);
+	if (substitute != nil) {
+		NSLog(@"QuickTimeFixer: export will read %@ instead of %@", substitute, arg1);
+		return ZKOrig(id, substitute, arg2, arg3, arg4);
+	}
+	return ZKOrig(id, arg1, arg2, arg3, arg4);
+}
+
 - (void)loadingDidFailWithError:(id)arg1 {
 	// While not strictly necessary, this is very useful information to have in the console.
 	NSLog(@"QuickTime failed to load document due to error: %@", arg1);
@@ -837,6 +1085,8 @@ EMPTY_SWIZZLE_INTERFACE(QTFixer_MGAssetLoader, NSObject);
 + (void)load {
 	ZKSwizzle(QTFixer_AVPlayerItem, AVPlayerItem);
 	ZKSwizzle(QTFixer_AVAssetExportSession, AVAssetExportSession);
+	// Fix for export error -12780
+	ZKSwizzle(QTFixer_NSFileManager, NSFileManager);
 	ZKSwizzle(QTFixer_MGDocumentViewController, MGDocumentViewController);
 	ZKSwizzle(QTFixer_MGCinematicFrameView, MGCinematicFrameView);
 	ZKSwizzle(QTFixer_MGAutovisibilityController, MGAutovisibilityController);
